@@ -1,97 +1,146 @@
-# Common Signal: Core AI Agent Workflows
+# Common Signal
 
-> **The Common Signal Ethos:** We believe AI engineering power belongs to everyone. The future of development is model-agnostic, git-native, and immune to vendor platform lock-in. Common Signal provides the foundational, pre-configured agent architectures and workflow blueprints that enable developers to execute sophisticated multi-file refactoring, debugging, and review pipelines directly from their native environment. Free forever for individuals; extendable for enterprise scale.
+Common Signal is a model-agnostic, git-native AI orchestration meta-framework. It treats the repository itself as the durable control plane: Issues capture intent, PRs capture proposed transitions, commits capture atomic state changes, and Markdown/YAML artifacts capture the routing metadata that agents need to collaborate without a proprietary orchestration database.
 
+This repository is the v1.0.0-alpha core baseline. It provides documentation, CI routing templates, workspace configuration, and model-specific agent profiles that can be copied into an application repo or used as the source of truth for a shared agent operations workspace.
+
+## Git As A State Machine
+
+Common Signal models software work as a state machine whose state is visible in git.
+
+| State Layer | Git-Native Artifact | Common Signal Role |
+| --- | --- | --- |
+| Intent | Issue, issue form, or webhook payload | Defines the requested change, archetype hint, attachments, and success criteria. |
+| Routing | YAML frontmatter, labels, CI variables | Selects the archetype, model profile, risk level, token budget, and privacy controls. |
+| Working State | Branch, draft PR, worktree | Contains agent-produced edits and local validation output. |
+| Transition | Commit | Records an atomic state change with a reviewable diff. |
+| Gate | CI job, status check, approval | Parses metadata, validates privacy constraints, checks tests, and decides whether work advances. |
+| Memory | Markdown notes, PR discussion, generated specs | Preserves the reasoning trail without requiring hidden conversation state. |
+
+The design goal is simple: every important orchestration decision should be recoverable from the repository timeline. A runner can fail, a model can change, or a vendor can disappear, and the project still retains its operational history through ordinary git objects and text files.
+
+## Hybrid YAML And Markdown
+
+Common Signal uses a hybrid file format:
+
+- YAML is used for metadata, routing, safety boundaries, model selection, and deterministic machine parsing.
+- Markdown is used for prompts, operator guidance, issue bodies, specs, and reviewable human context.
+
+Agent profile files combine both. Each profile starts with YAML frontmatter, followed by a Markdown system prompt. CI jobs parse the frontmatter first, then pass the Markdown body to the selected model runtime only after privacy and token checks have completed.
+
+## Archetype Onboarding Protocol
+
+Common Signal uses the five system roles popularized by Boris Cherny as an onboarding vocabulary. A user does not need to know which model to pick first; they describe the shape of the work, and Common Signal maps that intent to an archetype.
+
+| Archetype | Best For | Default Signal |
+| --- | --- | --- |
+| Prototyper | Exploring an idea, drafting a first pass, proving feasibility | "I need a quick version so we can see it." |
+| Builder | Implementing planned features, making structural code changes, wiring tests | "The direction is known; now build it correctly." |
+| Sweeper | Refactoring, cleanup, deduplication, migration, consistency passes | "This works, but it needs to be made clean." |
+| Grower | Expanding a working system through specs, product surface, docs, and scaling paths | "This exists; help it mature." |
+| Maintainer | Reliability, uptime, billing, MCP health, security posture, regression control | "Keep this stable and observable." |
+
+The onboarding flow is intentionally lightweight:
+
+1. Capture the request in an Issue, PR description, or local Markdown task.
+2. Add YAML frontmatter when the requester already knows the route.
+3. If no route is supplied, infer an archetype from the task language and labels.
+4. Select the matching agent profile and model mapping from `config/signal.example.yaml`.
+5. Run privacy scrubbing and token boundary checks before any model receives context.
+6. Write outputs back to git as commits, PR comments, generated specs, or Markdown artifacts.
+
+Example issue body:
+
+```markdown
+---
+archetype: Builder
+risk: medium
+model_hint: claude
+token_budget: 64000
+privacy: pii-scrub-required
 ---
 
-## 🏗️ Core Architecture Matrix
-
-Common Signal separates the **orchestration framework** from the **underlying LLM runtime**. Our template architecture is engineered to run seamlessly across distinct models and git providers without requiring file mutations.
-
-| Model Pipeline | Optimized Engine Task | Execution Surface | Privacy Level |
-| :--- | :--- | :--- | :--- |
-| **Claude** | Complex multi-file refactoring, code understanding, architectural design | Terminal / Aider Architect | High (Bring-your-own-API) |
-| **ChatGPT** | Structural refactoring, boilerplate generation, algorithm design | CLI Pipeline / Chat | High (Bring-your-own-API) |
-| **Gemini** | High-context log analysis, full-codebase indexing, legacy-to-modern translation | Deep-Context Workflows | High (Bring-your-own-API) |
-| **GitHub Copilot** | Fast inline autocompletions and routine tactical code generation | IDE Integration Layer | Managed Corporate Gateway |
-
----
-
-## ⚡ Step 1: Initialize the Local Engine (Aider Setup)
-
-Common Signal uses **Aider** as its git-native, terminal-first execution layer. Because Aider tracks all AI modifications as granular, reviewable git commits, it forms the perfect sandbox engine for executing code generation safely.
-
-### 1. Pre-requisites & Installation
-Ensure you are operating within a terminal environment with Python >= 3.9 and git configured. Install the core terminal engine:
-
-```bash
-python -m pip install aider-install
-aider-install
+Implement account-level audit event export and add regression coverage.
 ```
 
-### 2. Configure Your Environment Gateways
-Common Signal relies entirely on a "Bring Your Own API Key" utility model. This ensures that no data passes through an unvetted central server. Create a local, git-ignored configuration file at the root of your working project:
+## Model Routing Matrix
+
+| Runtime | Default Profile | Primary Strength | Typical Surface |
+| --- | --- | --- | --- |
+| Claude | `agents/claude/builder-profile.md` | Deep deterministic logic, refactoring, multi-file implementation | Terminal runner, CI worker, local worktree |
+| ChatGPT | `agents/chatgpt/maintainer-profile.md` | Operational checks, structured analysis, stability review | ChatOps, scheduled CI, incident triage |
+| Copilot | `agents/copilot/ide-routing.md` | IDE indexing, inline edits, developer workflow feedback | Editor extension, token gateway, workspace index |
+| Gemini | `agents/gemini/context-indexer.md` | Ultra-long-context logs, broad codebase matching, draft specs | Indexing job, analysis runner, spec compiler |
+
+The mapping is configurable. The example workspace defaults live in `config/signal.example.yaml` and intentionally separate model identity from archetype identity, so teams can change providers without rewriting prompt content.
+
+## CI Orchestration
+
+The repository includes provider-native entry points for GitHub and GitLab.
+
+- `.github/workflows/triage-routing.yml` listens for opened issues and pull request activity. It parses YAML frontmatter from Markdown bodies, creates a sanitized attachment manifest, and passes local file paths and event metadata to a Common Signal runner.
+- `.gitlab-ci.yml` is the root gatekeeper for pushes, merge requests, API-triggered issue events, and manual routing tests.
+- `.gitlab/ci/triage-step.yml` provides the modular GitLab parsing job that mirrors the GitHub workflow shape.
+
+The CI templates do not execute uploaded files. They isolate attachment references into JSON manifests so a local runner can decide whether and how to retrieve them under the workspace privacy policy.
+
+## Local Setup
+
+Create a local config from the example:
 
 ```bash
-# Inside your development workspace
-touch .env
+cp config/signal.example.yaml config/signal.local.yaml
 ```
 
-Add the target gateways you intend to run:
+Set provider credentials in your local environment or CI secret store:
+
 ```ini
-# Core Model API Gateways
 ANTHROPIC_API_KEY=your_claude_key_here
-OPENAI_API_KEY=your_chatgpt_key_here
+OPENAI_API_KEY=your_openai_key_here
 GEMINI_API_KEY=your_gemini_key_here
-
-# Enterprise Copilot Token Configuration (If applicable)
-GITHUB_TOKEN=your_copilot_token_here
+GITHUB_TOKEN=your_github_token_here
+HUBSPOT_PRIVATE_APP_TOKEN=your_hubspot_token_here
 ```
 
-### 3. Kick off your First Session
-Run your configuration framework using your model of choice. Common Signal agents are invoked by passing optimized model-routing flags directly to the engine:
+Run a dry route by passing the files created by CI to the runner:
 
 ```bash
-# Launching with Claude (High-reasoning architecture)
-aider --model sonnet
-
-# Launching with ChatGPT
-aider --model o3-mini
-
-# Launching with Gemini for ultra-deep context windows
-aider --model gemini/gemini-2.5-pro
+common-signal triage route \
+  --provider github \
+  --event issues.opened \
+  --frontmatter .common-signal/runtime/frontmatter.json \
+  --attachments .common-signal/runtime/attachments.json \
+  --workspace .
 ```
 
----
+If `common-signal` is not installed yet, the provided CI templates print the resolved arguments so the pipeline remains testable during early adoption.
 
-## 🌐 Dual-Platform Synchronization (GitHub & GitLab)
-
-Common Signal is designed to be fully decoupled from your specific cloud hosting git manager. The repository skeleton contains native parameters to execute continuous integration routines across both platforms.
-
-### GitHub Environments
-* Continuous integration and validation sequences live entirely within `.github/workflows/`.
-* Secure keys are mapped using GitHub Secrets and passed safely into your local CLI runtime.
-
-### GitLab Environments
-* Platform configuration is automatically managed via `.gitlab-ci.yml` at the root directory.
-* Custom, modular runtime pipeline components are maintained under `.gitlab/ci/` to allow seamless code-mirroring without pipeline collisions.
-
----
-
-## 📂 Repository Layout
+## Repository Layout
 
 ```text
-├── .github/
-│   └── workflows/            # GitHub Actions execution hooks
-├── .gitlab/
-│   └── ci/                   # Modular GitLab pipeline blocks
-├── agents/                   # Pre-configured prompt & agent profiles
-│   ├── chatgpt/              # OpenAI execution parameters
-│   ├── claude/               # Anthropic structural refactoring blueprints
-│   ├── copilot/              # Token refreshing and IDE routing rules
-│   └── gemini/               # Deep context file-mapping blueprints
-├── config/
-│   └── signal.example.yaml   # Agnostic environment settings baseline
-├── .gitlab-ci.yml            # Primary GitLab gatekeeper configuration
-└── README.md                 # System Overview & Onboarding Blueprint
+.
+|-- .github/
+|   `-- workflows/
+|       `-- triage-routing.yml
+|-- .gitlab/
+|   `-- ci/
+|       `-- triage-step.yml
+|-- agents/
+|   |-- chatgpt/
+|   |   `-- maintainer-profile.md
+|   |-- claude/
+|   |   `-- builder-profile.md
+|   |-- copilot/
+|   |   `-- ide-routing.md
+|   `-- gemini/
+|       `-- context-indexer.md
+|-- config/
+|   `-- signal.example.yaml
+|-- .gitlab-ci.yml
+|-- llms.txt
+`-- README.md
 ```
+
+## Status
+
+This is an alpha foundation. The core contract is stable enough to test routing, parse profile frontmatter, and wire provider-specific runners, but downstream teams should still version their local profiles and configs separately before production rollout.

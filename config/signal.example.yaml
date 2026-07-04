@@ -1,0 +1,229 @@
+schema_version: "1.0.0-alpha"
+workspace:
+  name: common-signal
+  description: Model-agnostic, git-native AI orchestration workspace.
+  state_backend: git
+  default_branch: main
+  artifact_root: .common-signal
+  runtime_root: .common-signal/runtime
+  prompt_format:
+    metadata: yaml-frontmatter
+    content: markdown
+
+git_state:
+  enabled: true
+  issue_frontmatter_required: false
+  pull_request_frontmatter_required: false
+  labels:
+    archetype_prefix: "signal/archetype:"
+    risk_prefix: "signal/risk:"
+    model_prefix: "signal/model:"
+  transitions:
+    issue_opened: triage
+    branch_created: working
+    pull_request_opened: review
+    checks_passed: ready-to-merge
+    merged: complete
+
+repository_hooks:
+  active: true
+  hooks:
+    pre_commit:
+      enabled: true
+      command: common-signal hooks run pre-commit
+      required_checks:
+        - pii-scrub
+        - prompt-frontmatter-validate
+        - token-boundary-check
+    pre_push:
+      enabled: true
+      command: common-signal hooks run pre-push
+      required_checks:
+        - branch-state-check
+        - generated-artifact-index
+    issue_opened:
+      enabled: true
+      provider_events:
+        github: issues.opened
+        gitlab: trigger:COMMON_SIGNAL_EVENT=issue.opened
+      command: common-signal triage route
+    pull_request:
+      enabled: true
+      provider_events:
+        github: pull_request
+        gitlab: merge_request_event
+      command: common-signal triage route
+
+privacy:
+  default_policy: pii-scrub-required
+  attachments:
+    allow_download: false
+    manifest_only: true
+    allowed_extensions:
+      - .md
+      - .txt
+      - .csv
+      - .json
+      - .pdf
+      - .png
+      - .jpg
+      - .jpeg
+    quarantine_dir: .common-signal/runtime/attachments
+  pii_scrubbing:
+    enabled: true
+    fail_on_match: true
+    redact_replacement: "[REDACTED]"
+    regex_flags:
+      case_insensitive: true
+      multiline: true
+      unicode: true
+    patterns:
+      email:
+        enabled: true
+        pattern: '\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b'
+      us_phone:
+        enabled: true
+        pattern: '\b(?:\+?1[-.\s]?)?(?:\(?[2-9][0-9]{2}\)?[-.\s]?)?[2-9][0-9]{2}[-.\s]?[0-9]{4}\b'
+      us_ssn:
+        enabled: true
+        pattern: '\b(?!000|666|9[0-9]{2})[0-9]{3}[- ]?(?!00)[0-9]{2}[- ]?(?!0000)[0-9]{4}\b'
+      credit_card_candidate:
+        enabled: true
+        pattern: '\b(?:[0-9][ -]*?){13,19}\b'
+      api_key_candidate:
+        enabled: true
+        pattern: '\b(?:api[_-]?key|token|secret|password)\s*[:=]\s*["''][^"'']{8,}["'']'
+      jwt_candidate:
+        enabled: true
+        pattern: '\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b'
+
+mcp_servers:
+  - id: local-file-system
+    enabled: true
+    transport: stdio
+    command: npx
+    args:
+      - -y
+      - "@modelcontextprotocol/server-filesystem"
+      - "."
+    trust_level: local
+    capabilities:
+      - read_files
+      - write_workspace_files
+      - list_directories
+    boundaries:
+      read_roots:
+        - "."
+      write_roots:
+        - "."
+      deny_globs:
+        - ".git/**"
+        - "**/.env"
+        - "**/.env.*"
+        - "**/*secret*"
+
+  - id: hubspot-crm-proxy
+    enabled: false
+    transport: http
+    url: http://127.0.0.1:8787/mcp
+    trust_level: restricted
+    auth:
+      type: bearer
+      env: HUBSPOT_PRIVATE_APP_TOKEN
+    capabilities:
+      - read_contacts
+      - read_companies
+      - read_deals
+    boundaries:
+      pii_scrub_required: true
+      write_enabled: false
+      allowed_object_types:
+        - contacts
+        - companies
+        - deals
+
+model_mapping:
+  primary_model: anthropic/claude-3-5-sonnet
+  fallback_model: openai/gpt-4o
+  indexing_model: google/gemini-1.5-pro
+  lightweight_model: openai/gpt-4o-mini
+  archetype_defaults:
+    Prototyper:
+      preferred_runtime: gemini
+      profile: agents/gemini/context-indexer.md
+      model: google/gemini-1.5-pro
+    Builder:
+      preferred_runtime: claude
+      profile: agents/claude/builder-profile.md
+      model: anthropic/claude-3-5-sonnet
+    Sweeper:
+      preferred_runtime: claude
+      profile: agents/claude/builder-profile.md
+      model: anthropic/claude-3-5-sonnet
+    Grower:
+      preferred_runtime: gemini
+      profile: agents/gemini/context-indexer.md
+      model: google/gemini-1.5-pro
+    Maintainer:
+      preferred_runtime: chatgpt
+      profile: agents/chatgpt/maintainer-profile.md
+      model: openai/gpt-4o
+    Workflow Integrator:
+      preferred_runtime: copilot
+      profile: agents/copilot/ide-routing.md
+      model: github/copilot
+
+token_boundaries:
+  default:
+    max_input_tokens: 64000
+    max_output_tokens: 4096
+    reserve_tokens: 4096
+  deep_context:
+    max_input_tokens: 1000000
+    max_output_tokens: 8192
+    reserve_tokens: 16384
+  maintainer:
+    max_input_tokens: 48000
+    max_output_tokens: 4096
+    reserve_tokens: 4096
+
+routing:
+  default_archetype: Builder
+  require_human_approval_for:
+    - production_deploy
+    - secrets_rotation
+    - billing_plan_change
+    - destructive_migration
+  attachment_manifest_path: .common-signal/runtime/attachments.json
+  frontmatter_manifest_path: .common-signal/runtime/frontmatter.json
+  runner:
+    command: common-signal
+    default_args:
+      - triage
+      - route
+    dry_run_when_missing: true
+
+observability:
+  health_checks:
+    mcp_servers: true
+    model_credentials: true
+    token_spend: true
+    hook_integrity: true
+  billing_alarms:
+    enabled: true
+    monthly_usd_soft_limit: 250
+    monthly_usd_hard_limit: 500
+    notify:
+      - issue_comment
+      - ci_summary
+
+ci:
+  github:
+    workflow: .github/workflows/triage-routing.yml
+    runner_labels:
+      - self-hosted
+      - common-signal
+  gitlab:
+    root_pipeline: .gitlab-ci.yml
+    modular_steps:
+      - .gitlab/ci/triage-step.yml

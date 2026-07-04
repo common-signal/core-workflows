@@ -1,0 +1,162 @@
+.common-signal-triage-step:
+  image: python:3.12-slim
+  variables:
+    PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    PYTHONDONTWRITEBYTECODE: "1"
+  before_script:
+    - python --version
+    - mkdir -p "$COMMON_SIGNAL_RUNTIME_DIR"
+  script:
+    - |
+      set -eu
+      python - <<'PY'
+      import json
+      import os
+      import re
+      import shlex
+      from pathlib import Path
+
+      runtime_dir = Path(os.environ.get("COMMON_SIGNAL_RUNTIME_DIR", ".common-signal/runtime"))
+      runtime_dir.mkdir(parents=True, exist_ok=True)
+
+      event = os.environ.get("COMMON_SIGNAL_EVENT") or os.environ.get("CI_PIPELINE_SOURCE", "unknown")
+      source = os.environ.get("CI_PIPELINE_SOURCE", "unknown")
+      body = (
+          os.environ.get("COMMON_SIGNAL_ISSUE_BODY")
+          or os.environ.get("COMMON_SIGNAL_MARKDOWN_BODY")
+          or os.environ.get("CI_MERGE_REQUEST_DESCRIPTION")
+          or os.environ.get("CI_COMMIT_MESSAGE")
+          or ""
+      )
+      title = (
+          os.environ.get("COMMON_SIGNAL_ISSUE_TITLE")
+          or os.environ.get("CI_MERGE_REQUEST_TITLE")
+          or os.environ.get("CI_COMMIT_TITLE")
+          or ""
+      )
+
+      def parse_scalar_frontmatter(raw):
+          parsed = {}
+          for line in raw.splitlines():
+              stripped = line.strip()
+              if not stripped or stripped.startswith("#") or ":" not in stripped:
+                  continue
+              key, value = stripped.split(":", 1)
+              key = key.strip()
+              value = value.strip().strip('"').strip("'")
+              if key:
+                  parsed[key] = value
+          return parsed
+
+      def parse_frontmatter(markdown):
+          match = re.match(r"\A---\s*\r?\n(.*?)\r?\n---\s*(?:\r?\n|\Z)", markdown, re.DOTALL)
+          if not match:
+              return {
+                  "present": False,
+                  "raw": "",
+                  "data": {},
+                  "parser": "none",
+              }, markdown
+          raw = match.group(1)
+          parser = "stdlib-scalar"
+          try:
+              import yaml
+          except Exception:
+              parsed = parse_scalar_frontmatter(raw)
+          else:
+              loaded = yaml.safe_load(raw) if raw.strip() else {}
+              parsed = loaded if isinstance(loaded, dict) else {"value": loaded}
+              parser = "pyyaml-safe_load"
+          return {
+              "present": True,
+              "raw": raw,
+              "data": parsed or {},
+              "parser": parser,
+          }, markdown[match.end():]
+
+      def attachment_manifest(markdown):
+          pattern = re.compile(r"(?P<url>https?://[^\s)>'\"]+/uploads/[^\s)>'\"]+|/uploads/[^\s)>'\"]+|https?://[^\s)>'\"]+\.(?:pdf|png|jpe?g|txt|csv|json)(?:\?[^\s)>'\"]*)?)", re.IGNORECASE)
+          items = []
+          for index, match in enumerate(pattern.finditer(markdown), start=1):
+              url = match.group("url")
+              clean = url.split("?", 1)[0].split("#", 1)[0]
+              filename = clean.rsplit("/", 1)[-1] or f"attachment-{index}"
+              suffix = Path(filename).suffix.lower()
+              items.append({
+                  "index": index,
+                  "source": "gitlab-markdown",
+                  "url": url,
+                  "filename": filename,
+                  "extension": suffix,
+                  "is_pdf": suffix == ".pdf",
+                  "downloaded": False,
+              })
+          return items
+
+      frontmatter, body_without_frontmatter = parse_frontmatter(body)
+      attachments = attachment_manifest(body)
+
+      frontmatter_path = runtime_dir / "frontmatter.json"
+      attachments_path = runtime_dir / "attachments.json"
+      context_path = runtime_dir / "event-context.json"
+      body_path = runtime_dir / "body.md"
+      args_path = runtime_dir / "runner-args.txt"
+
+      context = {
+          "provider": "gitlab",
+          "event_name": event,
+          "pipeline_source": source,
+          "project_path": os.environ.get("CI_PROJECT_PATH"),
+          "project_url": os.environ.get("CI_PROJECT_URL"),
+          "commit_sha": os.environ.get("CI_COMMIT_SHA"),
+          "merge_request_iid": os.environ.get("CI_MERGE_REQUEST_IID"),
+          "title": title,
+          "user_login": os.environ.get("GITLAB_USER_LOGIN"),
+      }
+
+      frontmatter_path.write_text(json.dumps(frontmatter, indent=2, sort_keys=True), encoding="utf-8")
+      attachments_path.write_text(json.dumps({"attachments": attachments}, indent=2, sort_keys=True), encoding="utf-8")
+      context_path.write_text(json.dumps(context, indent=2, sort_keys=True), encoding="utf-8")
+      body_path.write_text(body_without_frontmatter, encoding="utf-8")
+
+      runner_args = [
+          "triage",
+          "route",
+          "--provider", "gitlab",
+          "--event", event,
+          "--config", os.environ.get("COMMON_SIGNAL_CONFIG", "config/signal.example.yaml"),
+          "--frontmatter", str(frontmatter_path),
+          "--attachments", str(attachments_path),
+          "--context", str(context_path),
+          "--body", str(body_path),
+          "--workspace", os.environ.get("CI_PROJECT_DIR", "."),
+      ]
+      args_path.write_text(shlex.join(runner_args), encoding="utf-8")
+      print(shlex.join(runner_args))
+      PY
+    - |
+      set -eu
+      RUNNER_EVENT="${COMMON_SIGNAL_EVENT:-${CI_PIPELINE_SOURCE:-unknown}}"
+      RUNNER_WORKSPACE="${CI_PROJECT_DIR:-.}"
+      if command -v "$COMMON_SIGNAL_RUNNER" >/dev/null 2>&1; then
+        "$COMMON_SIGNAL_RUNNER" triage route \
+          --provider gitlab \
+          --event "$RUNNER_EVENT" \
+          --config "${COMMON_SIGNAL_CONFIG:-config/signal.example.yaml}" \
+          --frontmatter "$COMMON_SIGNAL_RUNTIME_DIR/frontmatter.json" \
+          --attachments "$COMMON_SIGNAL_RUNTIME_DIR/attachments.json" \
+          --context "$COMMON_SIGNAL_RUNTIME_DIR/event-context.json" \
+          --body "$COMMON_SIGNAL_RUNTIME_DIR/body.md" \
+          --workspace "$RUNNER_WORKSPACE"
+      elif [ "${COMMON_SIGNAL_DRY_RUN_WHEN_MISSING:-true}" = "true" ]; then
+        echo "Common Signal runner not found; dry-run arguments:"
+        printf '%s\n' "$(cat "$COMMON_SIGNAL_RUNTIME_DIR/runner-args.txt")"
+      else
+        echo "Common Signal runner not found and dry-run is disabled." >&2
+        exit 127
+      fi
+  artifacts:
+    when: always
+    expire_in: 7 days
+    paths:
+      - .common-signal/runtime/

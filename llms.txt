@@ -1,0 +1,23 @@
+# Common Signal
+
+> Common Signal is a model-agnostic, git-native AI orchestration meta-framework that uses Issues, PRs, commits, and Markdown/YAML artifacts as durable state for agent workflows.
+
+Common Signal routes work through archetype-specific agent profiles and provider-neutral CI hooks. Use these files as the canonical entry points for setup, orchestration, and model-specific behavior.
+
+## Core Documentation
+
+- [README](README.md): System overview, Git-as-a-State-Machine architecture, and archetype onboarding protocol.
+- [Example Workspace Configuration](config/signal.example.yaml): Baseline workspace, hooks, privacy, MCP server, and model routing settings.
+
+## Agent Templates
+
+- [ChatGPT Maintainer Profile](agents/chatgpt/maintainer-profile.md): Maintainer profile for MCP health, uptime, billing alarms, and structural stability checks.
+- [Claude Builder Profile](agents/claude/builder-profile.md): Builder and Sweeper profile for deterministic code changes, refactoring, and PII stripping before commits.
+- [Copilot IDE Routing](agents/copilot/ide-routing.md): IDE workflow integration profile for token refresh, workspace indexing, and editor feedback loops.
+- [Gemini Context Indexer](agents/gemini/context-indexer.md): Prototyper and Grower profile for ultra-long-context log analysis, codebase matching, and draft specification generation.
+
+## CI Orchestration
+
+- [GitHub Triage Routing Workflow](.github/workflows/triage-routing.yml): GitHub issue and pull request router that parses frontmatter and attachment manifests before invoking Common Signal.
+- [GitLab Root Gatekeeper](.gitlab-ci.yml): GitLab pipeline entry point that maps push, merge request, API, trigger, and issue webhook variables into runner arguments.
+- [GitLab Triage Step](.gitlab/ci/triage-step.yml): Modular GitLab triage parser for frontmatter, upload manifests, and local runner context handoff.

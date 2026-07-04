@@ -1,0 +1,37 @@
+stages:
+  - signal-triage
+
+variables:
+  COMMON_SIGNAL_CONFIG: "config/signal.example.yaml"
+  COMMON_SIGNAL_PROVIDER: "gitlab"
+  COMMON_SIGNAL_RUNTIME_DIR: ".common-signal/runtime"
+  COMMON_SIGNAL_RUNNER: "common-signal"
+  COMMON_SIGNAL_DRY_RUN_WHEN_MISSING: "true"
+
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+      variables:
+        COMMON_SIGNAL_EVENT: "push"
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      variables:
+        COMMON_SIGNAL_EVENT: "merge_request"
+    - if: '$CI_PIPELINE_SOURCE == "api" && $COMMON_SIGNAL_EVENT =~ /^issue\./'
+    - if: '$CI_PIPELINE_SOURCE == "trigger" && $COMMON_SIGNAL_EVENT =~ /^issue\./'
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+      variables:
+        COMMON_SIGNAL_EVENT: "manual"
+    - when: never
+
+include:
+  - local: ".gitlab/ci/triage-step.yml"
+
+common-signal:gatekeeper:
+  extends: .common-signal-triage-step
+  stage: signal-triage
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_PIPELINE_SOURCE == "api" && $COMMON_SIGNAL_EVENT =~ /^issue\./'
+    - if: '$CI_PIPELINE_SOURCE == "trigger" && $COMMON_SIGNAL_EVENT =~ /^issue\./'
+    - if: '$CI_PIPELINE_SOURCE == "web"'

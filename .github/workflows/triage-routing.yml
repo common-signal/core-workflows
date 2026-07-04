@@ -1,0 +1,211 @@
+name: Common Signal Triage Routing
+
+on:
+  issues:
+    types:
+      - opened
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: common-signal-${{ github.event_name }}-${{ github.event.issue.number || github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  route:
+    name: Parse metadata and route
+    runs-on:
+      - self-hosted
+      - common-signal
+    env:
+      COMMON_SIGNAL_PROVIDER: github
+      COMMON_SIGNAL_CONFIG: config/signal.example.yaml
+      COMMON_SIGNAL_RUNTIME_DIR: ${{ runner.temp }}/common-signal
+      COMMON_SIGNAL_RUNNER: common-signal
+      COMMON_SIGNAL_DRY_RUN_WHEN_MISSING: "true"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Parse issue or pull request markdown
+        id: parse
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$COMMON_SIGNAL_RUNTIME_DIR"
+
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import shlex
+          from pathlib import Path
+
+          event_path = Path(os.environ["GITHUB_EVENT_PATH"])
+          payload = json.loads(event_path.read_text(encoding="utf-8"))
+          event_name = os.environ.get("GITHUB_EVENT_NAME", "unknown")
+
+          subject = payload.get("issue") or payload.get("pull_request") or {}
+          body = subject.get("body") or ""
+          title = subject.get("title") or ""
+          number = subject.get("number")
+          html_url = subject.get("html_url")
+
+          def parse_scalar_frontmatter(raw):
+              parsed = {}
+              for line in raw.splitlines():
+                  stripped = line.strip()
+                  if not stripped or stripped.startswith("#") or ":" not in stripped:
+                      continue
+                  key, value = stripped.split(":", 1)
+                  key = key.strip()
+                  value = value.strip().strip('"').strip("'")
+                  if key:
+                      parsed[key] = value
+              return parsed
+
+          def parse_frontmatter(markdown):
+              match = re.match(r"\A---\s*\r?\n(.*?)\r?\n---\s*(?:\r?\n|\Z)", markdown, re.DOTALL)
+              if not match:
+                  return {
+                      "present": False,
+                      "raw": "",
+                      "data": {},
+                      "parser": "none",
+                  }, markdown
+              raw = match.group(1)
+              parser = "stdlib-scalar"
+              try:
+                  import yaml
+              except Exception:
+                  parsed = parse_scalar_frontmatter(raw)
+              else:
+                  loaded = yaml.safe_load(raw) if raw.strip() else {}
+                  parsed = loaded if isinstance(loaded, dict) else {"value": loaded}
+                  parser = "pyyaml-safe_load"
+              return {
+                  "present": True,
+                  "raw": raw,
+                  "data": parsed or {},
+                  "parser": parser,
+              }, markdown[match.end():]
+
+          def attachment_manifest(markdown):
+              pattern = re.compile(r"(?P<url>https://github\.com/user-attachments/files/[^\s)>'\"]+|https://user-images\.githubusercontent\.com/[^\s)>'\"]+|https://github\.com/[^/\s)>'\"]+/[^/\s)>'\"]+/files/[^\s)>'\"]+)", re.IGNORECASE)
+              items = []
+              for index, match in enumerate(pattern.finditer(markdown), start=1):
+                  url = match.group("url")
+                  clean = url.split("?", 1)[0].split("#", 1)[0]
+                  filename = clean.rsplit("/", 1)[-1] or f"attachment-{index}"
+                  suffix = Path(filename).suffix.lower()
+                  items.append({
+                      "index": index,
+                      "source": "github-markdown",
+                      "url": url,
+                      "filename": filename,
+                      "extension": suffix,
+                      "is_pdf": suffix == ".pdf",
+                      "downloaded": False,
+                  })
+              return items
+
+          frontmatter, body_without_frontmatter = parse_frontmatter(body)
+          attachments = attachment_manifest(body)
+
+          runtime_dir = Path(os.environ["COMMON_SIGNAL_RUNTIME_DIR"])
+          frontmatter_path = runtime_dir / "frontmatter.json"
+          attachments_path = runtime_dir / "attachments.json"
+          context_path = runtime_dir / "event-context.json"
+          body_path = runtime_dir / "body.md"
+
+          frontmatter_path.write_text(json.dumps(frontmatter, indent=2, sort_keys=True), encoding="utf-8")
+          attachments_path.write_text(json.dumps({"attachments": attachments}, indent=2, sort_keys=True), encoding="utf-8")
+          context_path.write_text(json.dumps({
+              "provider": "github",
+              "event_name": event_name,
+              "action": payload.get("action"),
+              "number": number,
+              "title": title,
+              "html_url": html_url,
+              "repository": payload.get("repository", {}).get("full_name"),
+              "sender": payload.get("sender", {}).get("login"),
+          }, indent=2, sort_keys=True), encoding="utf-8")
+          body_path.write_text(body_without_frontmatter, encoding="utf-8")
+
+          event_value = f"{event_name}.{payload.get('action')}" if payload.get("action") else event_name
+          output_path = Path(os.environ["GITHUB_OUTPUT"])
+          with output_path.open("a", encoding="utf-8") as fh:
+              fh.write(f"event={event_value}\n")
+              fh.write(f"frontmatter={frontmatter_path}\n")
+              fh.write(f"attachments={attachments_path}\n")
+              fh.write(f"context={context_path}\n")
+              fh.write(f"body={body_path}\n")
+              fh.write("runner_args=")
+              fh.write(shlex.join([
+                  "triage",
+                  "route",
+                  "--provider", "github",
+                  "--event", event_value,
+                  "--config", os.environ["COMMON_SIGNAL_CONFIG"],
+                  "--frontmatter", str(frontmatter_path),
+                  "--attachments", str(attachments_path),
+                  "--context", str(context_path),
+                  "--body", str(body_path),
+                  "--workspace", os.environ["GITHUB_WORKSPACE"],
+              ]))
+              fh.write("\n")
+          PY
+
+      - name: Invoke Common Signal runner
+        shell: bash
+        env:
+          COMMON_SIGNAL_EVENT: ${{ steps.parse.outputs.event }}
+          COMMON_SIGNAL_FRONTMATTER: ${{ steps.parse.outputs.frontmatter }}
+          COMMON_SIGNAL_ATTACHMENTS: ${{ steps.parse.outputs.attachments }}
+          COMMON_SIGNAL_CONTEXT: ${{ steps.parse.outputs.context }}
+          COMMON_SIGNAL_BODY: ${{ steps.parse.outputs.body }}
+          COMMON_SIGNAL_RUNNER_ARGS: ${{ steps.parse.outputs.runner_args }}
+        run: |
+          set -euo pipefail
+          if command -v "$COMMON_SIGNAL_RUNNER" >/dev/null 2>&1; then
+            "$COMMON_SIGNAL_RUNNER" triage route \
+              --provider "$COMMON_SIGNAL_PROVIDER" \
+              --event "$COMMON_SIGNAL_EVENT" \
+              --config "$COMMON_SIGNAL_CONFIG" \
+              --frontmatter "$COMMON_SIGNAL_FRONTMATTER" \
+              --attachments "$COMMON_SIGNAL_ATTACHMENTS" \
+              --context "$COMMON_SIGNAL_CONTEXT" \
+              --body "$COMMON_SIGNAL_BODY" \
+              --workspace "$GITHUB_WORKSPACE"
+          elif [ "$COMMON_SIGNAL_DRY_RUN_WHEN_MISSING" = "true" ]; then
+            echo "Common Signal runner not found; dry-run arguments:"
+            printf '%q ' "$COMMON_SIGNAL_RUNNER" triage route \
+              --provider "$COMMON_SIGNAL_PROVIDER" \
+              --event "$COMMON_SIGNAL_EVENT" \
+              --config "$COMMON_SIGNAL_CONFIG" \
+              --frontmatter "$COMMON_SIGNAL_FRONTMATTER" \
+              --attachments "$COMMON_SIGNAL_ATTACHMENTS" \
+              --context "$COMMON_SIGNAL_CONTEXT" \
+              --body "$COMMON_SIGNAL_BODY" \
+              --workspace "$GITHUB_WORKSPACE"
+            printf '\n'
+          else
+            echo "Common Signal runner not found and dry-run is disabled." >&2
+            exit 127
+          fi
+
+      - name: Upload routing manifests
+        uses: actions/upload-artifact@v4
+        with:
+          name: common-signal-routing-${{ github.run_id }}
+          path: ${{ env.COMMON_SIGNAL_RUNTIME_DIR }}
+          if-no-files-found: error
