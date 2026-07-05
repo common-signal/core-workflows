@@ -173,6 +173,12 @@ model_mapping:
       profile: agents/copilot/ide-routing.md
       model: github/copilot
 
+local_runtime:
+  ollama:
+    api_base: http://127.0.0.1:11434
+    tags_path: /api/tags
+    aider_model: ollama_chat/qwen2.5-coder
+
 token_boundaries:
   default:
     max_input_tokens: 64000

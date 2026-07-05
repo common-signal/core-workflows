@@ -163,6 +163,24 @@ In desktop mode, selecting an archetype and clicking `Apply Profile` invokes the
 .common-signal/local/archetype-profile.json
 ```
 
+The desktop backend also includes `check_ollama_connection`, which calls the local Ollama tags endpoint and returns the available model names to the frontend:
+
+```text
+http://127.0.0.1:11434/api/tags
+```
+
+The endpoint is configurable through `config/signal.local.yaml`. If that file is not present, Common Signal falls back to `config/signal.example.yaml`, then to `http://127.0.0.1:11434`.
+
+```yaml
+local_runtime:
+  ollama:
+    api_base: http://127.0.0.1:11434
+    tags_path: /api/tags
+    aider_model: ollama_chat/qwen2.5-coder
+```
+
+If Ollama is not reachable, the command returns a descriptive fallback string instead of crashing the Tauri app.
+
 Build checks:
 
 ```bash
@@ -174,10 +192,62 @@ npm run desktop:build
 
 The `package-lock.json` file is intentionally committed. It pins the npm dependency graph for the Tauri/Vite client so contributors and CI install the same package versions.
 
+## Local Ollama And Aider
+
+Common Signal, made by BakerTech, can run against a local Ollama and Aider workflow for private repository work.
+
+Override the local Ollama endpoint by creating `config/signal.local.yaml` and changing `local_runtime.ollama.api_base`:
+
+```yaml
+local_runtime:
+  ollama:
+    api_base: http://127.0.0.1:11434
+    tags_path: /api/tags
+    aider_model: ollama_chat/qwen2.5-coder
+```
+
+Verify Ollama is listening:
+
+```bash
+curl http://127.0.0.1:11434/api/tags
+```
+
+On Windows PowerShell:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:11434/api/tags
+```
+
+Run the local Aider launcher:
+
+```bash
+bin/signal-aider-local.sh
+```
+
+The launcher checks that `aider` exists in `PATH`, exports the configured Ollama endpoint as `OLLAMA_API_BASE`, reads local Common Signal boundaries from `config/signal.local.yaml` when present, writes a runtime boundary snapshot to `.common-signal/runtime/aider-local-boundaries.env`, and then starts Aider with:
+
+```bash
+aider --model ollama_chat/qwen2.5-coder --architect --auto-commits
+```
+
+Override the default model when needed:
+
+```bash
+AIDER_OLLAMA_MODEL=ollama_chat/llama3.1 bin/signal-aider-local.sh
+```
+
+Pass additional Aider arguments after the script name:
+
+```bash
+bin/signal-aider-local.sh README.md config/signal.example.yaml
+```
+
 ## Repository Layout
 
 ```text
 .
+|-- bin/
+|   `-- signal-aider-local.sh
 |-- src/
 |   |-- Onboarding.ts
 |   |-- main.ts

@@ -54,10 +54,21 @@ type TauriRuntimeWindow = Window &
     };
   };
 
+type OllamaTagsResponse = {
+  readonly models?: readonly {
+    readonly name?: string;
+  }[];
+};
+
+const DEFAULT_OLLAMA_API_BASE = "http://127.0.0.1:11434";
+const DEFAULT_OLLAMA_TAGS_PATH = "/api/tags";
+
 export function renderOnboarding(root: HTMLElement): void {
   let selected: Archetype = DEFAULT_ARCHETYPE;
   let isSaving = false;
+  let isCheckingOllama = false;
   let status = getInitialStatus();
+  let ollamaStatus = "Ollama models have not been checked.";
   let statusTone: "idle" | "success" | "error" = "idle";
 
   const render = () => {
@@ -91,6 +102,26 @@ export function renderOnboarding(root: HTMLElement): void {
       setStatus(formatInvokeError(error), "error");
     } finally {
       isSaving = false;
+      render();
+    }
+  };
+
+  const checkOllama = async () => {
+    if (isCheckingOllama) {
+      return;
+    }
+
+    isCheckingOllama = true;
+    ollamaStatus = "Checking local Ollama models...";
+    render();
+
+    try {
+      const modelNames = await getOllamaModels();
+      ollamaStatus = formatOllamaModels(modelNames);
+    } catch (error) {
+      ollamaStatus = formatInvokeError(error);
+    } finally {
+      isCheckingOllama = false;
       render();
     }
   };
@@ -129,6 +160,17 @@ export function renderOnboarding(root: HTMLElement): void {
 
     const footer = createElement("footer", "action-bar");
     const activeLabel = createElement("p", "active-label", `Active selection: ${selected}`);
+    const actions = createElement("div", "actions");
+    const ollamaAction = createElement(
+      "button",
+      "secondary-action",
+      isCheckingOllama ? "Checking..." : "Check Ollama"
+    );
+    ollamaAction.setAttribute("type", "button");
+    ollamaAction.disabled = isCheckingOllama;
+    ollamaAction.addEventListener("click", () => {
+      void checkOllama();
+    });
     const action = createElement(
       "button",
       "primary-action",
@@ -139,9 +181,15 @@ export function renderOnboarding(root: HTMLElement): void {
     action.addEventListener("click", () => {
       void saveSelection();
     });
-    footer.append(activeLabel, action);
+    actions.append(ollamaAction, action);
+    footer.append(activeLabel, actions);
 
-    shell.append(header, grid, footer);
+    const diagnostics = createElement("section", "diagnostics");
+    diagnostics.setAttribute("aria-label", "Local runtime diagnostics");
+    diagnostics.append(createElement("p", "diagnostic-label", "Ollama"));
+    diagnostics.append(createElement("p", "diagnostic-value", ollamaStatus));
+
+    shell.append(header, grid, diagnostics, footer);
     return shell;
   };
 
@@ -235,4 +283,70 @@ function getInitialStatus(): string {
   }
 
   return "Browser preview is active. Desktop save uses the Tauri shell.";
+}
+
+async function getOllamaModels(): Promise<string[]> {
+  if (canInvokeTauri()) {
+    return invoke<string[]>("check_ollama_connection");
+  }
+
+  const response = await fetch(await getBrowserPreviewOllamaTagsUrl());
+
+  if (!response.ok) {
+    return [`Ollama responded with HTTP status ${response.status}.`];
+  }
+
+  const payload = (await response.json()) as OllamaTagsResponse;
+  const modelNames = payload.models
+    ?.map((model) => model.name?.trim() ?? "")
+    .filter((name) => name.length > 0)
+    .sort();
+
+  return modelNames?.length
+    ? modelNames
+    : ["Ollama is reachable, but no local models were reported."];
+}
+
+async function getBrowserPreviewOllamaTagsUrl(): Promise<string> {
+  const configBody = await readBrowserPreviewConfig();
+  const apiBase =
+    parseYamlScalar(configBody, "api_base") ?? DEFAULT_OLLAMA_API_BASE;
+  const tagsPath =
+    parseYamlScalar(configBody, "tags_path") ?? DEFAULT_OLLAMA_TAGS_PATH;
+
+  return `${apiBase.replace(/\/+$/, "")}${normalizeUrlPath(tagsPath)}`;
+}
+
+async function readBrowserPreviewConfig(): Promise<string> {
+  for (const path of ["/config/signal.local.yaml", "/config/signal.example.yaml"]) {
+    try {
+      const response = await fetch(path);
+
+      if (response.ok) {
+        return response.text();
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return "";
+}
+
+function parseYamlScalar(configBody: string, key: string): string | null {
+  const pattern = new RegExp(`^\\s*${key}:\\s*['"]?([^'"\\r\\n#]+)['"]?`, "m");
+  const match = configBody.match(pattern);
+  return match?.[1]?.trim() ?? null;
+}
+
+function normalizeUrlPath(path: string): string {
+  return path.startsWith("/") ? path : `/${path}`;
+}
+
+function formatOllamaModels(modelNames: readonly string[]): string {
+  if (modelNames.length === 0) {
+    return "Ollama is reachable, but no local models were reported.";
+  }
+
+  return `Models: ${modelNames.join(", ")}`;
 }

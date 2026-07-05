@@ -5,6 +5,7 @@ build/
 .vite-dev.*.log
 src-tauri/target/
 src-tauri/gen/
+config/signal.local.yaml
 
 .DS_Store
 Thumbs.db

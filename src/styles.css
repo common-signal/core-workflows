@@ -30,7 +30,7 @@ button {
 
 .app-shell {
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto 1fr auto auto;
   min-height: 100vh;
   padding: 32px;
   background:
@@ -184,10 +184,48 @@ h1 {
   border-top: 1px solid #ddd8ca;
 }
 
+.actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
 .active-label {
   color: #45524f;
   font-size: 0.96rem;
   font-weight: 700;
+}
+
+.diagnostics {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  max-width: 1180px;
+  width: 100%;
+  margin: 22px auto 0;
+  padding: 12px 14px;
+  border: 1px solid #ddd8ca;
+  border-radius: 8px;
+  background: #fffdf8;
+}
+
+.diagnostic-label,
+.diagnostic-value {
+  margin: 0;
+}
+
+.diagnostic-label {
+  color: #7b3428;
+  font-size: 0.78rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.diagnostic-value {
+  color: #45524f;
+  font-size: 0.92rem;
+  line-height: 1.4;
 }
 
 .primary-action {
@@ -200,6 +238,30 @@ h1 {
   color: #ffffff;
   font-weight: 820;
   cursor: pointer;
+}
+
+.secondary-action {
+  min-width: 138px;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid #bdb7a6;
+  border-radius: 8px;
+  background: #fffdf8;
+  color: #253d38;
+  font-weight: 820;
+  cursor: pointer;
+}
+
+.secondary-action:hover,
+.secondary-action:focus-visible {
+  border-color: #253d38;
+  outline: 3px solid rgba(37, 61, 56, 0.16);
+  outline-offset: 2px;
+}
+
+.secondary-action:disabled {
+  cursor: wait;
+  opacity: 0.68;
 }
 
 .primary-action:hover,
@@ -243,7 +305,13 @@ h1 {
     flex-direction: column;
   }
 
-  .primary-action {
+  .actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .primary-action,
+  .secondary-action {
     width: 100%;
   }
 }
