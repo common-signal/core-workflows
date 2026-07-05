@@ -1,0 +1,249 @@
+:root {
+  color: #17211f;
+  background: #f7f5ef;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+}
+
+button {
+  font: inherit;
+}
+
+#app {
+  min-height: 100vh;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  min-height: 100vh;
+  padding: 32px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.76), rgba(255, 255, 255, 0) 42%),
+    #f7f5ef;
+}
+
+.workspace-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 360px);
+  gap: 24px;
+  align-items: start;
+  max-width: 1180px;
+  width: 100%;
+  margin: 0 auto 28px;
+}
+
+.title-block {
+  display: grid;
+  gap: 8px;
+}
+
+.eyebrow,
+.subtitle,
+.status-pill,
+.active-label,
+.option-description,
+.option-signal {
+  margin: 0;
+}
+
+.eyebrow {
+  color: #7b3428;
+  font-size: 0.8rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0;
+  color: #12211f;
+  font-size: 2.3rem;
+  line-height: 1.05;
+  font-weight: 850;
+}
+
+.subtitle {
+  max-width: 620px;
+  color: #52615d;
+  font-size: 1rem;
+  line-height: 1.55;
+}
+
+.status-pill {
+  justify-self: end;
+  width: 100%;
+  min-height: 48px;
+  padding: 12px 14px;
+  border: 1px solid #d9d6ca;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #52615d;
+  font-size: 0.92rem;
+  line-height: 1.35;
+}
+
+.status-pill.success {
+  border-color: #86a66d;
+  color: #315c3d;
+  background: #f2f8ed;
+}
+
+.status-pill.error {
+  border-color: #d49784;
+  color: #8f2f22;
+  background: #fff1eb;
+}
+
+.archetype-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(150px, 1fr));
+  gap: 12px;
+  align-content: start;
+  max-width: 1180px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.archetype-option {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 12px;
+  min-height: 228px;
+  padding: 18px;
+  border: 1px solid #d8d4c7;
+  border-radius: 8px;
+  background: #fffdf8;
+  color: #17211f;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease,
+    transform 150ms ease,
+    background 150ms ease;
+}
+
+.archetype-option:hover,
+.archetype-option:focus-visible {
+  border-color: #9a6d48;
+  box-shadow: 0 14px 30px rgba(44, 36, 26, 0.12);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.archetype-option[data-selected="true"] {
+  border-color: #253d38;
+  background: #eef5f2;
+  box-shadow: inset 0 0 0 2px #253d38;
+}
+
+.option-name {
+  color: #12211f;
+  font-size: 1.08rem;
+  font-weight: 820;
+}
+
+.option-description {
+  color: #45524f;
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.option-signal {
+  align-self: end;
+  color: #7b3428;
+  font-size: 0.83rem;
+  font-weight: 760;
+  line-height: 1.35;
+}
+
+.action-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  max-width: 1180px;
+  width: 100%;
+  margin: 28px auto 0;
+  padding-top: 18px;
+  border-top: 1px solid #ddd8ca;
+}
+
+.active-label {
+  color: #45524f;
+  font-size: 0.96rem;
+  font-weight: 700;
+}
+
+.primary-action {
+  min-width: 156px;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1px solid #253d38;
+  border-radius: 8px;
+  background: #253d38;
+  color: #ffffff;
+  font-weight: 820;
+  cursor: pointer;
+}
+
+.primary-action:hover,
+.primary-action:focus-visible {
+  background: #172b27;
+  outline: 3px solid rgba(37, 61, 56, 0.22);
+  outline-offset: 2px;
+}
+
+.primary-action:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+@media (max-width: 980px) {
+  .workspace-header,
+  .archetype-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .status-pill {
+    justify-self: stretch;
+  }
+
+  .archetype-option {
+    min-height: 176px;
+  }
+}
+
+@media (max-width: 640px) {
+  .app-shell {
+    padding: 22px 16px;
+  }
+
+  h1 {
+    font-size: 1.9rem;
+  }
+
+  .action-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .primary-action {
+    width: 100%;
+  }
+}

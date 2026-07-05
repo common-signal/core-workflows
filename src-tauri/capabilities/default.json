@@ -1,0 +1,34 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default local desktop permissions for the Common Signal control plane.",
+  "windows": ["main"],
+  "permissions": [
+    "core:app:default",
+    "core:event:default",
+    "core:path:default",
+    "core:webview:default",
+    "core:window:default",
+    "fs:read-dirs",
+    "fs:read-files",
+    "fs:write-files",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        { "path": "$HOME/**/*" },
+        { "path": "$DOCUMENT/**/*" },
+        { "path": "$DESKTOP/**/*" },
+        { "path": "$DOWNLOAD/**/*" },
+        { "path": "$APPCONFIG/**/*" },
+        { "path": "$APPDATA/**/*" }
+      ],
+      "deny": [
+        { "path": "$HOME/.aws/**/*" },
+        { "path": "$HOME/.gnupg/**/*" },
+        { "path": "$HOME/.ssh/**/*" },
+        { "path": "$HOME/.env" },
+        { "path": "$HOME/.env.*" }
+      ]
+    }
+  ]
+}

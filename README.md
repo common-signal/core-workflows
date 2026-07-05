@@ -115,10 +115,82 @@ common-signal triage route \
 
 If `common-signal` is not installed yet, the provided CI templates print the resolved arguments so the pipeline remains testable during early adoption.
 
+## Local Desktop Client
+
+This repository includes an early Tauri v2 desktop client. The client is a lightweight local control plane for selecting a Common Signal archetype and, when launched through Tauri, writing local profile state back into the workspace.
+
+Install JavaScript dependencies:
+
+```bash
+npm install
+```
+
+On Windows PowerShell, use `npm.cmd` if script execution policy blocks the `npm` shim:
+
+```powershell
+npm.cmd install
+```
+
+Run the browser preview:
+
+```bash
+npm run dev
+```
+
+Then open:
+
+```text
+http://127.0.0.1:1420/
+```
+
+The browser preview is useful for checking the TypeScript UI. Because it is not running inside the Tauri shell, profile saves are stored in browser `localStorage` only.
+
+Run the desktop shell:
+
+```bash
+npm run desktop:dev
+```
+
+The desktop command requires the Rust toolchain. Verify Rust is available before launching Tauri:
+
+```bash
+cargo --version
+```
+
+In desktop mode, selecting an archetype and clicking `Apply Profile` invokes the Rust command `update_archetype_profile` and writes local state to:
+
+```text
+.common-signal/local/archetype-profile.json
+```
+
+Build checks:
+
+```bash
+npm run build
+npm run desktop:build
+```
+
+`npm run build` validates the TypeScript/Vite frontend. `npm run desktop:build` validates and packages the full Tauri app, and also requires Rust/Cargo.
+
+The `package-lock.json` file is intentionally committed. It pins the npm dependency graph for the Tauri/Vite client so contributors and CI install the same package versions.
+
 ## Repository Layout
 
 ```text
 .
+|-- src/
+|   |-- Onboarding.ts
+|   |-- main.ts
+|   `-- styles.css
+|-- src-tauri/
+|   |-- capabilities/
+|   |   `-- default.json
+|   |-- src/
+|   |   |-- lib.rs
+|   |   `-- main.rs
+|   |-- build.rs
+|   |-- Cargo.toml
+|   `-- tauri.conf.json
 |-- .github/
 |   `-- workflows/
 |       `-- triage-routing.yml
@@ -137,7 +209,10 @@ If `common-signal` is not installed yet, the provided CI templates print the res
 |-- config/
 |   `-- signal.example.yaml
 |-- .gitlab-ci.yml
+|-- index.html
 |-- llms.txt
+|-- package.json
+|-- package-lock.json
 `-- README.md
 ```
 
