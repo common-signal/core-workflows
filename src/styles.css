@@ -48,6 +48,31 @@ button {
   margin: 0 auto 28px;
 }
 
+.brand-block {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 18px;
+  align-items: center;
+}
+
+.logo-frame {
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  border: 1px solid rgba(47, 247, 138, 0.34);
+  border-radius: 8px;
+  background: #152421;
+  box-shadow: 0 12px 24px rgba(21, 36, 33, 0.14);
+}
+
+.brand-logo {
+  display: block;
+  width: 52px;
+  height: 52px;
+  object-fit: contain;
+}
+
 .title-block {
   display: grid;
   gap: 8px;
@@ -298,6 +323,21 @@ h1 {
 
   h1 {
     font-size: 1.9rem;
+  }
+
+  .brand-block {
+    grid-template-columns: 56px minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .logo-frame {
+    width: 56px;
+    height: 56px;
+  }
+
+  .brand-logo {
+    width: 40px;
+    height: 40px;
   }
 
   .action-bar {

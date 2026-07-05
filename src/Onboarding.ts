@@ -1,4 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import logoUrl from "../assets/logo.png";
 
 type Archetype = "Prototyper" | "Builder" | "Sweeper" | "Grower" | "Maintainer";
 
@@ -137,6 +138,15 @@ export function renderOnboarding(root: HTMLElement): void {
     const shell = createElement("main", "app-shell");
 
     const header = createElement("header", "workspace-header");
+    const brandBlock = createElement("div", "brand-block");
+    const logoFrame = createElement("div", "logo-frame");
+    const logo = createElement("img", "brand-logo") as HTMLImageElement;
+    logo.src = logoUrl;
+    logo.alt = "Common Signal logo";
+    logo.width = 56;
+    logo.height = 56;
+    logoFrame.append(logo);
+
     const titleBlock = createElement("div", "title-block");
     const eyebrow = createElement("p", "eyebrow", "Common Signal");
     const title = createElement("h1", undefined, "Archetype Onboarding");
@@ -146,9 +156,10 @@ export function renderOnboarding(root: HTMLElement): void {
       "Pick the work profile that best matches this local workspace session."
     );
     titleBlock.append(eyebrow, title, subtitle);
+    brandBlock.append(logoFrame, titleBlock);
 
     const statusPill = createElement("p", `status-pill ${statusTone}`, status);
-    header.append(titleBlock, statusPill);
+    header.append(brandBlock, statusPill);
 
     const grid = createElement("section", "archetype-grid");
     grid.setAttribute("role", "radiogroup");
