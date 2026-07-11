@@ -210,8 +210,8 @@ enum LocalReconError {
         path: String,
         source: std::io::Error,
     },
-    #[error("mistral.rs could not load {model_id}: {source}")]
-    ModelLoad { model_id: String, source: String },
+    #[error("mistral.rs could not load {model_id}: {details}")]
+    ModelLoad { model_id: String, details: String },
     #[error("mistral.rs inference failed: {0}")]
     Inference(String),
     #[error("Local Recon model state is unavailable: {0}")]
@@ -311,7 +311,7 @@ pub fn bootstrap_local_recon(
         .unwrap_or_else(|_| "mistral.rs Hugging Face cache".to_string());
     let selected_model_ready = state
         .loaded_model_id()
-        .map(|model_id| model_id == recommended_model.id)
+        .map(|model_id| model_id.as_deref() == Some(recommended_model.id))
         .unwrap_or(false)
         || model_marker_exists(&app, recommended_model.id);
 
@@ -382,18 +382,57 @@ pub async fn distill_local_recon_prompt(
             .map_err(error_to_string)?,
         _ => recommend_model(&hardware).map_err(error_to_string)?,
     };
+
+    emit_progress(
+        &app,
+        LocalReconProgress {
+            model_id: profile.id.to_string(),
+            phase: "distill-start",
+            message: format!("Preparing {} for prompt distillation.", profile.label),
+            progress: Some(0.05),
+            cached: model_marker_exists(&app, profile.id),
+        },
+    );
+
     let model = ensure_loaded_model(&state, &app, profile)
         .await
         .map_err(error_to_string)?;
     let messages = TextMessages::new()
         .add_message(TextMessageRole::System, LOCAL_RECON_SYSTEM_PROMPT)
         .add_message(TextMessageRole::User, raw_intent.as_str());
+
+    emit_progress(
+        &app,
+        LocalReconProgress {
+            model_id: profile.id.to_string(),
+            phase: "generating",
+            message: format!(
+                "Running local inference with {}. CPU-only runs can take a little while.",
+                profile.label
+            ),
+            progress: None,
+            cached: true,
+        },
+    );
+
     let response = model
         .send_chat_request(messages)
         .await
         .map_err(|source| LocalReconError::Inference(source.to_string()))
         .map_err(error_to_string)?;
-    let distilled_output = response
+
+    emit_progress(
+        &app,
+        LocalReconProgress {
+            model_id: profile.id.to_string(),
+            phase: "finalizing",
+            message: "Cleaning and scoring the distilled prompt.".to_string(),
+            progress: Some(0.9),
+            cached: true,
+        },
+    );
+
+    let model_output = response
         .choices
         .into_iter()
         .next()
@@ -402,8 +441,20 @@ pub async fn distill_local_recon_prompt(
         .filter(|content| !content.is_empty())
         .ok_or(LocalReconError::MissingContent)
         .map_err(error_to_string)?;
+    let distilled_output = select_distilled_output(&raw_intent, &model_output);
     let raw_token_estimate = estimate_tokens(&raw_intent);
     let distilled_token_estimate = estimate_tokens(&distilled_output);
+
+    emit_progress(
+        &app,
+        LocalReconProgress {
+            model_id: profile.id.to_string(),
+            phase: "complete",
+            message: format!("Distilled prompt with {}.", profile.label),
+            progress: Some(1.0),
+            cached: true,
+        },
+    );
 
     Ok(LocalReconDistillation {
         raw_intent,
@@ -677,16 +728,16 @@ async fn ensure_loaded_model(
 
     emit_progress(
         app,
-            LocalReconProgress {
-                model_id: profile.id.to_string(),
-                phase: "loading",
-                message: format!(
-                    "Loading {}. mistral.rs will reuse cached weights when present.",
-                    profile.label
-                ),
-                progress: Some(0.45),
-                cached: model_marker_exists(app, profile.id),
-            },
+        LocalReconProgress {
+            model_id: profile.id.to_string(),
+            phase: "loading",
+            message: format!(
+                "Loading {}. mistral.rs will reuse cached weights when present.",
+                profile.label
+            ),
+            progress: Some(0.45),
+            cached: model_marker_exists(app, profile.id),
+        },
     );
 
     let model = builder
@@ -694,7 +745,7 @@ async fn ensure_loaded_model(
         .await
         .map_err(|source| LocalReconError::ModelLoad {
             model_id: profile.id.to_string(),
-            source: source.to_string(),
+            details: source.to_string(),
         })?;
     let model = Arc::new(model);
 
@@ -825,6 +876,227 @@ fn normalize_distilled_output(output: &str) -> String {
         .trim_matches('"')
         .trim()
         .to_string()
+}
+
+fn select_distilled_output(raw_intent: &str, model_output: &str) -> String {
+    let raw_normalized = comparable_text(raw_intent);
+    let output_normalized = comparable_text(model_output);
+    let raw_tokens = estimate_tokens(raw_intent);
+    let output_tokens = estimate_tokens(model_output);
+    let output_is_echo = (!raw_normalized.is_empty() && raw_normalized == output_normalized)
+        || (raw_tokens > 24 && output_tokens >= raw_tokens.saturating_sub(2));
+
+    if output_is_echo {
+        let heuristic = distill_heuristically(raw_intent);
+
+        if !heuristic.trim().is_empty() {
+            return heuristic;
+        }
+    }
+
+    model_output.trim().to_string()
+}
+
+fn distill_heuristically(raw_intent: &str) -> String {
+    let joined = raw_intent
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .filter(|line| !is_non_intent_line(line))
+        .map(strip_markdown_prefix)
+        .map(strip_conversational_lead)
+        .map(strip_filler_words)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let collapsed = joined.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    select_technical_sentences(&collapsed)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(collapsed)
+}
+
+fn is_non_intent_line(line: &str) -> bool {
+    let normalized = line.trim().to_ascii_lowercase();
+
+    normalized == "thanks"
+        || normalized == "thank you"
+        || normalized.starts_with("thanks ")
+        || normalized.starts_with("thank you")
+        || normalized.starts_with("sorry ")
+        || normalized.starts_with("i'm sorry")
+        || normalized.starts_with("im sorry")
+        || normalized.starts_with("tone:")
+        || normalized.starts_with("format:")
+        || normalized.starts_with("formatting:")
+        || normalized.starts_with("output format:")
+}
+
+fn strip_markdown_prefix(line: &str) -> String {
+    let trimmed = line
+        .trim()
+        .trim_start_matches('`')
+        .trim_end_matches('`')
+        .trim_start_matches('#')
+        .trim();
+    let without_bullet = trimmed
+        .strip_prefix("- ")
+        .or_else(|| trimmed.strip_prefix("* "))
+        .or_else(|| trimmed.strip_prefix("+ "))
+        .or_else(|| trimmed.strip_prefix("> "))
+        .unwrap_or(trimmed);
+
+    strip_numbered_prefix(without_bullet).trim().to_string()
+}
+
+fn strip_numbered_prefix(line: &str) -> &str {
+    let Some((index, character)) = line.char_indices().find(|(_, character)| {
+        *character == '.'
+            || *character == ')'
+            || !character.is_ascii_digit()
+    }) else {
+        return line;
+    };
+
+    if (character == '.' || character == ')') && index > 0 {
+        line.get(index + character.len_utf8()..).unwrap_or(line)
+    } else {
+        line
+    }
+}
+
+fn strip_conversational_lead(line: String) -> String {
+    let mut value = line.trim().to_string();
+
+    for prefix in [
+        "can you ",
+        "could you ",
+        "would you ",
+        "i need you to ",
+        "i want you to ",
+        "i would like you to ",
+        "i need to ",
+        "i want to ",
+        "help me ",
+        "we need to ",
+        "the task is to ",
+        "my request is to ",
+    ] {
+        if let Some(stripped) = strip_prefix_ascii_case_insensitive(&value, prefix) {
+            value = stripped.trim().to_string();
+            break;
+        }
+    }
+
+    value
+}
+
+fn strip_filler_words(line: String) -> String {
+    const FILLER: &[&str] = &[
+        "please",
+        "kindly",
+        "just",
+        "really",
+        "basically",
+        "honestly",
+        "literally",
+        "maybe",
+        "probably",
+        "sort",
+        "kind",
+        "of",
+    ];
+
+    line.split_whitespace()
+        .filter(|word| {
+            let normalized = word
+                .trim_matches(|character: char| !character.is_ascii_alphanumeric())
+                .to_ascii_lowercase();
+
+            !FILLER.contains(&normalized.as_str())
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn select_technical_sentences(value: &str) -> Option<String> {
+    let sentences = value
+        .split_terminator(|character| matches!(character, '.' | '!' | '?'))
+        .map(str::trim)
+        .filter(|sentence| !sentence.is_empty())
+        .collect::<Vec<_>>();
+
+    if sentences.len() <= 1 {
+        return Some(value.trim().to_string());
+    }
+
+    let technical = sentences
+        .iter()
+        .copied()
+        .filter(|sentence| contains_technical_signal(sentence))
+        .collect::<Vec<_>>();
+    let selected = if technical.is_empty() {
+        sentences
+    } else {
+        technical
+    };
+
+    Some(selected.join(". "))
+}
+
+fn contains_technical_signal(sentence: &str) -> bool {
+    const SIGNALS: &[&str] = &[
+        "add",
+        "build",
+        "create",
+        "fix",
+        "implement",
+        "refactor",
+        "remove",
+        "replace",
+        "update",
+        "wire",
+        "test",
+        "debug",
+        "migrate",
+        "backend",
+        "frontend",
+        "api",
+        "rust",
+        "tauri",
+        "component",
+        "model",
+        "prompt",
+        "token",
+        "cache",
+        "download",
+        "dispatch",
+        "ui",
+    ];
+    let normalized = sentence.to_ascii_lowercase();
+
+    SIGNALS
+        .iter()
+        .any(|signal| {
+            normalized.split_whitespace().any(|word| {
+                word.trim_matches(|character: char| !character.is_ascii_alphanumeric()) == *signal
+            })
+        })
+}
+
+fn comparable_text(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+fn strip_prefix_ascii_case_insensitive<'a>(value: &'a str, prefix: &str) -> Option<&'a str> {
+    value
+        .get(..prefix.len())
+        .filter(|head| head.eq_ignore_ascii_case(prefix))
+        .and_then(|_| value.get(prefix.len()..))
 }
 
 fn estimate_tokens(input: &str) -> u64 {

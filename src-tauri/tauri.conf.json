@@ -30,7 +30,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": ["../assets/logo.png"]
+    "icon": ["icons/icon.ico", "../assets/logo.png"]
   },
   "plugins": {
     "fs": {

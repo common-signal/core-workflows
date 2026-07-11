@@ -155,6 +155,79 @@ The desktop command requires the Rust toolchain. Verify Rust is available before
 
 ```bash
 cargo --version
+rustc --version
+rustup --version
+```
+
+If any of those commands fail, install Rust with `rustup`, then close and reopen your terminal before trying again.
+
+### Install Rust On Windows
+
+1. Open the official Rust installer page:
+
+   ```text
+   https://www.rust-lang.org/tools/install
+   ```
+
+2. Download and run `rustup-init.exe`.
+
+3. Accept the default install option when prompted.
+
+4. If the installer asks for Visual Studio C++ Build Tools, install them. Choose the C++ desktop build tools workload when Visual Studio Installer opens.
+
+5. Close PowerShell, open a new PowerShell window, then verify:
+
+   ```powershell
+   rustup --version
+   rustc --version
+   cargo --version
+   ```
+
+6. From this repository, run:
+
+   ```powershell
+   npm.cmd run desktop:dev
+   ```
+
+### Install Rust On macOS
+
+1. Open Terminal and run:
+
+   ```bash
+   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+   ```
+
+2. Accept the default install option when prompted.
+
+3. Close Terminal, open a new Terminal window, then verify:
+
+   ```bash
+   rustup --version
+   rustc --version
+   cargo --version
+   ```
+
+4. From this repository, run:
+
+   ```bash
+   npm run desktop:dev
+   ```
+
+If verification still fails after reopening the terminal, make sure Rust's cargo binary directory is on `PATH`. On Windows it is usually `%USERPROFILE%\.cargo\bin`; on macOS it is usually `$HOME/.cargo/bin`.
+
+If PowerShell says `rustc` or `cargo` is not recognized, run this check:
+
+```powershell
+Test-Path "$env:USERPROFILE\.cargo\bin\rustc.exe"
+Test-Path "$env:USERPROFILE\.cargo\bin\cargo.exe"
+```
+
+If both return `False`, Rust is not installed yet. Run the Windows installer above. If they return `True`, Rust is installed but your current terminal does not have the cargo directory on `PATH`. Close every PowerShell and VS Code terminal, open a new PowerShell window, and try the version checks again. For a temporary fix in the current PowerShell window:
+
+```powershell
+$env:Path += ";$env:USERPROFILE\.cargo\bin"
+rustc --version
+cargo --version
 ```
 
 In desktop mode, selecting an archetype and clicking `Apply Profile` invokes the Rust command `update_archetype_profile` and writes local state to:
@@ -202,13 +275,81 @@ local_runtime:
     dispatch_provider: anthropic
 ```
 
+### Hugging Face Token
+
+Local Recon downloads GGUF model weights through the Hugging Face Hub. Public models may work without a token, but a token is recommended and gated models require one. Hugging Face calls this a User Access Token; for local model downloads, use a `read` token or a fine-grained token with read access to the model.
+
+Create the token:
+
+1. Go to:
+
+   ```text
+   https://huggingface.co/settings/tokens
+   ```
+
+2. Click `New token`.
+
+3. Choose `read`, or choose `fine-grained` and grant read access to the model repositories you plan to use.
+
+4. Copy the token. It will look like `hf_...`.
+
+Set it for the current PowerShell window:
+
+```powershell
+$env:HF_TOKEN = "hf_your_token_here"
+npm.cmd run desktop:dev
+```
+
+Set it permanently on Windows:
+
+```powershell
+[Environment]::SetEnvironmentVariable("HF_TOKEN", "hf_your_token_here", "User")
+```
+
+After setting it permanently, close every PowerShell and VS Code terminal, then open a fresh terminal and verify:
+
+```powershell
+$env:HF_TOKEN
+```
+
+Set it for the current macOS Terminal window:
+
+```bash
+export HF_TOKEN="hf_your_token_here"
+npm run desktop:dev
+```
+
+Set it permanently on macOS:
+
+```bash
+echo 'export HF_TOKEN="hf_your_token_here"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+If a model is gated, also open the model page in your browser while logged into Hugging Face and accept its access terms before clicking `Prepare Model`.
+
+### Local Recon Smoke Test
+
+Paste this into `Raw Intent`:
+
+```text
+Hey, could you please just help me with something? I'm kind of stuck and I need you to update the Tauri backend so it validates the YAML config file and shows any parsing errors in the UI. Please make it clean and maybe format the answer nicely. Thanks!
+```
+
+Click `Distill`. A good result should look close to:
+
+```text
+Update the Tauri backend to validate the YAML config file and display parsing errors in the UI.
+```
+
+The exact wording can vary by model, but the distilled output should be shorter, technical, and free of the greeting, uncertainty, thanks, and formatting chatter.
+
 ## Repository Layout
 
 ```text
 .
-|-- bin/
-|   `-- signal-aider-local.sh
 |-- src/
+|   |-- LocalRecon.ts
 |   |-- Onboarding.ts
 |   |-- main.ts
 |   `-- styles.css
@@ -216,7 +357,9 @@ local_runtime:
 |   |-- capabilities/
 |   |   `-- default.json
 |   |-- src/
+|   |   |-- hardware.rs
 |   |   |-- lib.rs
+|   |   |-- local_recon.rs
 |   |   `-- main.rs
 |   |-- build.rs
 |   |-- Cargo.toml

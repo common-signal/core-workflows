@@ -48,7 +48,7 @@ struct ArchetypeProfileState {
 }
 
 #[tauri::command]
-pub fn scan_local_repository(path: String) -> Result<String, String> {
+fn scan_local_repository(path: String) -> Result<String, String> {
     let root = resolve_user_path(&path)?;
 
     if !root.is_dir() {
@@ -72,7 +72,7 @@ pub fn scan_local_repository(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn update_archetype_profile(archetype: String) -> Result<bool, String> {
+fn update_archetype_profile(archetype: String) -> Result<bool, String> {
     let archetype = Archetype::parse(&archetype)?;
     let workspace_root = find_common_signal_root()?;
     let state_dir = workspace_root.join(".common-signal").join("local");

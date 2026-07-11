@@ -1,5 +1,5 @@
 use serde::Serialize;
-use std::{fs, process::Command};
+use std::process::Command;
 
 const BYTES_PER_GIB: u64 = 1024 * 1024 * 1024;
 const LIGHTWEIGHT_DEFAULT_MODEL: &str = "phi3-mini-4k-instruct-q4";
@@ -133,7 +133,7 @@ fn detect_total_vram_bytes() -> Option<(u64, &'static str)> {
 
 #[cfg(target_os = "linux")]
 fn detect_total_ram_bytes() -> Option<(u64, &'static str)> {
-    let body = fs::read_to_string("/proc/meminfo").ok()?;
+    let body = std::fs::read_to_string("/proc/meminfo").ok()?;
     let mem_total_line = body
         .lines()
         .find(|line| line.trim_start().starts_with("MemTotal:"))?;

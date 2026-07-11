@@ -378,6 +378,135 @@ h1 {
   transition: width 180ms ease;
 }
 
+.progress-track-indeterminate .progress-fill {
+  width: 38%;
+  min-width: 88px;
+  animation: recon-progress-sweep 1.2s ease-in-out infinite;
+}
+
+.recon-activity {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #d7dfdc;
+  border-radius: 8px;
+  background: #f9fbfa;
+}
+
+.activity-header {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.activity-spinner {
+  width: 22px;
+  height: 22px;
+  margin-top: 2px;
+  border: 3px solid #d7dfdc;
+  border-top-color: #7b3428;
+  border-radius: 50%;
+  animation: recon-spin 850ms linear infinite;
+}
+
+.activity-heading {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.activity-title {
+  color: #253d38;
+  font-size: 0.96rem;
+  line-height: 1.25;
+}
+
+.activity-message {
+  margin: 0;
+  color: #45524f;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.activity-details {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px 14px;
+  padding-top: 2px;
+}
+
+.activity-detail {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  margin: 0;
+}
+
+.activity-detail-label {
+  color: #7b3428;
+  font-size: 0.72rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.activity-detail strong {
+  overflow-wrap: anywhere;
+  color: #253d38;
+  font-size: 0.88rem;
+  line-height: 1.3;
+}
+
+.activity-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 2px 0 0;
+  list-style: none;
+}
+
+.activity-step {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  min-height: 32px;
+  color: #52615d;
+  font-size: 0.84rem;
+  line-height: 1.3;
+}
+
+.step-marker {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border: 1px solid #b9c3bf;
+  border-radius: 50%;
+  background: #ffffff;
+}
+
+.activity-step[data-state="done"] {
+  color: #315c3d;
+}
+
+.activity-step[data-state="done"] .step-marker {
+  border-color: #3e6b59;
+  background: #3e6b59;
+}
+
+.activity-step[data-state="active"] {
+  color: #253d38;
+  font-weight: 760;
+}
+
+.activity-step[data-state="active"] .step-marker {
+  border-color: #7b3428;
+  background: #ffffff;
+  box-shadow: 0 0 0 4px rgba(123, 52, 40, 0.14);
+  animation: recon-step-pulse 950ms ease-in-out infinite;
+}
+
 .recon-body {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -642,6 +771,33 @@ h1 {
   opacity: 0.68;
 }
 
+@keyframes recon-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes recon-progress-sweep {
+  0% {
+    transform: translateX(-130%);
+  }
+
+  100% {
+    transform: translateX(290%);
+  }
+}
+
+@keyframes recon-step-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px rgba(123, 52, 40, 0.1);
+  }
+
+  50% {
+    box-shadow: 0 0 0 6px rgba(123, 52, 40, 0.2);
+  }
+}
+
 @media (max-width: 980px) {
   .workspace-header,
   .diagnostics,
@@ -650,6 +806,10 @@ h1 {
   .recon-body,
   .recon-meta,
   .dispatch-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .activity-details {
     grid-template-columns: 1fr;
   }
 

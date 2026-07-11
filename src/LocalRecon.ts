@@ -32,6 +32,12 @@ type PaidDispatchResponse = {
 
 type PaidProvider = Extract<CloudProviderId, "openai" | "anthropic">;
 
+type LocalReconActivity = {
+  readonly kind: "prepare" | "distill" | "dispatch";
+  readonly label: string;
+  readonly modelId: string | null;
+};
+
 type LocalReconController = {
   readonly build: (engineState: ClientEngineState | null) => HTMLElement;
 };
@@ -57,8 +63,21 @@ export function createLocalReconController(requestRender: () => void): LocalReco
   let isPreparing = false;
   let isDistilling = false;
   let isDispatching = false;
+  let activeActivity: LocalReconActivity | null = null;
   let listenerStarted = false;
   let unlistenProgress: UnlistenFn | null = null;
+
+  const beginActivity = (
+    kind: LocalReconActivity["kind"],
+    label: string,
+    modelId: string | null
+  ) => {
+    activeActivity = { kind, label, modelId };
+  };
+
+  const finishActivity = () => {
+    activeActivity = null;
+  };
 
   const setStatus = (message: string, tone: "idle" | "success" | "error" = "idle") => {
     status = message;
@@ -77,7 +96,11 @@ export function createLocalReconController(requestRender: () => void): LocalReco
       unlistenProgress = await listen<LocalReconProgress>(LOCAL_RECON_EVENT, (event) => {
         progress = event.payload;
         status = event.payload.message;
-        statusTone = event.payload.phase === "ready" ? "success" : "idle";
+        statusTone =
+          (event.payload.phase === "ready" && !isDistilling) ||
+          event.payload.phase === "complete"
+            ? "success"
+            : "idle";
         requestRender();
       });
     } catch (error) {
@@ -87,7 +110,7 @@ export function createLocalReconController(requestRender: () => void): LocalReco
     }
   };
 
-  const prepareModel = async (modelId: string) => {
+  const prepareModel = async (modelId: string, label = modelLabel(modelId)) => {
     if (isPreparing) {
       return;
     }
@@ -98,20 +121,30 @@ export function createLocalReconController(requestRender: () => void): LocalReco
     }
 
     isPreparing = true;
+    beginActivity("prepare", label, modelId);
+    progress = {
+      modelId,
+      phase: "resolving",
+      message: `Checking local files for ${label}.`,
+      progress: null,
+      cached: false
+    };
     setStatus("Preparing Local Recon model.");
 
     try {
       await startProgressListener();
       await invoke("download_local_recon_model", { modelId });
+      setStatus(`${label} is ready for Local Recon.`, "success");
     } catch (error) {
       setStatus(formatError(error), "error");
     } finally {
       isPreparing = false;
+      finishActivity();
       requestRender();
     }
   };
 
-  const distill = async (modelId: string) => {
+  const distill = async (modelId: string, label = modelLabel(modelId)) => {
     if (isDistilling) {
       return;
     }
@@ -123,24 +156,39 @@ export function createLocalReconController(requestRender: () => void): LocalReco
 
     isDistilling = true;
     dispatchResponse = null;
+    beginActivity("distill", label, modelId);
+    progress = {
+      modelId,
+      phase: "distill-start",
+      message: `Starting local distillation with ${label}.`,
+      progress: null,
+      cached: false
+    };
     setStatus("Distilling raw intent locally.");
 
     try {
       await startProgressListener();
-      const result = canInvokeTauri()
+      const isDesktop = canInvokeTauri();
+      const result = isDesktop
         ? await invoke<LocalReconDistillation>("distill_local_recon_prompt", {
             rawIntent,
             modelId
           })
-        : distillInBrowserPreview(rawIntent, modelId, modelLabel(modelId));
+        : distillInBrowserPreview(rawIntent, modelId, label);
 
       distillation = result;
       distilledOutput = result.distilledOutput;
-      setStatus(`Distilled with ${result.modelLabel}.`, "success");
+      setStatus(
+        isDesktop
+          ? `Distilled with ${result.modelLabel}.`
+          : "Preview distillation complete. Desktop mode uses embedded mistral.rs.",
+        "success"
+      );
     } catch (error) {
       setStatus(formatError(error), "error");
     } finally {
       isDistilling = false;
+      finishActivity();
       requestRender();
     }
   };
@@ -166,6 +214,7 @@ export function createLocalReconController(requestRender: () => void): LocalReco
     }
 
     isDispatching = true;
+    beginActivity("dispatch", providerLabel(paidProvider), null);
     setStatus(`Dispatching to ${providerLabel(paidProvider)}.`);
 
     try {
@@ -182,6 +231,7 @@ export function createLocalReconController(requestRender: () => void): LocalReco
       setStatus(formatError(error), "error");
     } finally {
       isDispatching = false;
+      finishActivity();
       requestRender();
     }
   };
@@ -227,7 +277,7 @@ export function createLocalReconController(requestRender: () => void): LocalReco
     prepareAction.disabled = isPreparing || !selectedModel;
     prepareAction.addEventListener("click", () => {
       if (selectedModel) {
-        void prepareModel(selectedModel.id);
+        void prepareModel(selectedModel.id, selectedModel.label);
       }
     });
 
@@ -244,7 +294,15 @@ export function createLocalReconController(requestRender: () => void): LocalReco
       fill.style.width = `${Math.round(progress.progress * 100)}%`;
       meter.append(fill);
       statusRow.append(meter);
+    } else if (activeActivity) {
+      const meter = el("div", "progress-track progress-track-indeterminate");
+      meter.append(el("span", "progress-fill"));
+      statusRow.append(meter);
     }
+
+    const activityPanel = activeActivity
+      ? buildActivityPanel(activeActivity, progress, status)
+      : null;
 
     const body = el("div", "recon-body");
     const rawField = buildTextPanel(
@@ -296,14 +354,20 @@ export function createLocalReconController(requestRender: () => void): LocalReco
     distillAction.disabled = isDistilling || !selectedModel;
     distillAction.addEventListener("click", () => {
       if (selectedModel) {
-        void distill(selectedModel.id);
+        void distill(selectedModel.id, selectedModel.label);
       }
     });
     actions.append(distillAction);
 
     const dispatchPanel = buildDispatchPanel(dispatch);
 
-    shell.append(header, statusRow, body, meta, actions, dispatchPanel);
+    shell.append(header, statusRow);
+
+    if (activityPanel) {
+      shell.append(activityPanel);
+    }
+
+    shell.append(body, meta, actions, dispatchPanel);
 
     if (dispatchResponse) {
       shell.append(buildDispatchResponse(dispatchResponse));
@@ -401,6 +465,59 @@ function buildMetric(label: string, value: string): HTMLElement {
   return metric;
 }
 
+function buildActivityPanel(
+  activity: LocalReconActivity,
+  progress: LocalReconProgress | null,
+  fallbackMessage: string
+): HTMLElement {
+  const phase = progress?.phase ?? fallbackPhase(activity.kind);
+  const stages = activityStages(activity.kind);
+  const activeIndex = activeStageIndex(activity.kind, stages, phase);
+  const panel = el("section", "recon-activity");
+  panel.setAttribute("aria-live", "polite");
+
+  const header = el("div", "activity-header");
+  const spinner = el("span", "activity-spinner");
+  spinner.setAttribute("aria-hidden", "true");
+
+  const heading = el("div", "activity-heading");
+  heading.append(
+    el("strong", "activity-title", activityTitle(activity.kind)),
+    el("p", "activity-message", progress?.message ?? fallbackMessage)
+  );
+  header.append(spinner, heading);
+
+  const details = el("div", "activity-details");
+  details.append(
+    buildActivityDetail(activity.kind === "dispatch" ? "Target" : "Model", activity.label),
+    buildActivityDetail("Phase", phaseLabel(phase))
+  );
+
+  if (activity.kind !== "dispatch") {
+    details.append(buildActivityDetail("Cache", cacheLabel(progress)));
+  }
+
+  const steps = el("ol", "activity-steps");
+
+  stages.forEach((stage, index) => {
+    const item = el("li", "activity-step");
+    item.dataset.state = stepState(index, activeIndex, phase);
+    item.append(el("span", "step-marker"), el("span", "step-label", stage.label));
+    steps.append(item);
+  });
+
+  panel.append(header, details, steps);
+
+  return panel;
+}
+
+function buildActivityDetail(label: string, value: string): HTMLElement {
+  const detail = el("p", "activity-detail");
+  detail.append(el("span", "activity-detail-label", label), el("strong", undefined, value));
+
+  return detail;
+}
+
 function buildDispatchResponse(response: PaidDispatchResponse): HTMLElement {
   const panel = el("section", "dispatch-response");
   const header = el(
@@ -419,6 +536,112 @@ function buildDispatchResponse(response: PaidDispatchResponse): HTMLElement {
   panel.append(header, output, usage);
 
   return panel;
+}
+
+type ActivityStage = {
+  readonly label: string;
+  readonly phases: readonly string[];
+};
+
+function activityStages(kind: LocalReconActivity["kind"]): readonly ActivityStage[] {
+  if (kind === "prepare") {
+    return [
+      { label: "Check local model files", phases: ["resolving"] },
+      { label: "Load model through mistral.rs", phases: ["loading"] },
+      { label: "Ready model for use", phases: ["ready", "complete"] }
+    ];
+  }
+
+  if (kind === "distill") {
+    return [
+      { label: "Check model cache", phases: ["distill-start", "resolving"] },
+      { label: "Load or reuse weights", phases: ["loading"] },
+      { label: "Run local inference", phases: ["ready", "generating"] },
+      { label: "Clean distilled output", phases: ["finalizing", "complete"] }
+    ];
+  }
+
+  return [{ label: "Await provider response", phases: ["dispatching"] }];
+}
+
+function activeStageIndex(
+  kind: LocalReconActivity["kind"],
+  stages: readonly ActivityStage[],
+  phase: string
+): number {
+  if (kind === "distill" && phase === "ready") {
+    return Math.max(
+      stages.findIndex((stage) => stage.phases.includes("generating")),
+      0
+    );
+  }
+
+  const index = stages.findIndex((stage) => stage.phases.includes(phase));
+
+  return index >= 0 ? index : 0;
+}
+
+function stepState(index: number, activeIndex: number, phase: string): "pending" | "active" | "done" {
+  if (phase === "complete" || index < activeIndex) {
+    return "done";
+  }
+
+  if (index === activeIndex) {
+    return "active";
+  }
+
+  return "pending";
+}
+
+function fallbackPhase(kind: LocalReconActivity["kind"]): string {
+  if (kind === "prepare") {
+    return "resolving";
+  }
+
+  if (kind === "distill") {
+    return "distill-start";
+  }
+
+  return "dispatching";
+}
+
+function activityTitle(kind: LocalReconActivity["kind"]): string {
+  if (kind === "prepare") {
+    return "Preparing model";
+  }
+
+  if (kind === "distill") {
+    return "Distillation running";
+  }
+
+  return "Dispatch running";
+}
+
+function phaseLabel(phase: string): string {
+  const labels: Record<string, string> = {
+    "distill-start": "Preparing",
+    resolving: "Resolving files",
+    loading: "Loading model",
+    ready: "Model ready",
+    generating: "Local inference",
+    finalizing: "Finalizing",
+    complete: "Complete",
+    dispatching: "Dispatching"
+  };
+
+  return labels[phase] ?? phase;
+}
+
+function cacheLabel(progress: LocalReconProgress | null): string {
+  if (!progress) {
+    return "Checking";
+  }
+
+  if (progress.cached) {
+    return "Using cached files";
+  }
+
+  return "May download on first use";
 }
 
 function currentSavings(
@@ -449,10 +672,7 @@ function distillInBrowserPreview(
   modelId: string,
   label: string
 ): LocalReconDistillation {
-  const distilledOutput = rawIntent
-    .replace(/\b(please|just|really|basically|kind of|sort of)\b/gi, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  const distilledOutput = distillHeuristically(rawIntent);
   const rawTokenEstimate = estimateTokens(rawIntent);
   const distilledTokenEstimate = estimateTokens(distilledOutput);
 
@@ -465,6 +685,92 @@ function distillInBrowserPreview(
     modelId,
     modelLabel: label
   };
+}
+
+function distillHeuristically(rawIntent: string): string {
+  const strippedLines = rawIntent
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !isNonIntentLine(line))
+    .map(stripMarkdownPrefix)
+    .map(stripConversationalLead)
+    .map(stripFillerWords)
+    .join(" ");
+  const collapsed = strippedLines.replace(/\s+/g, " ").trim();
+  const sentence = selectTechnicalSentence(collapsed);
+
+  return sentence || collapsed || rawIntent.trim();
+}
+
+function isNonIntentLine(line: string): boolean {
+  const normalized = line.toLowerCase();
+
+  return (
+    normalized === "thanks" ||
+    normalized === "thank you" ||
+    normalized.startsWith("thanks ") ||
+    normalized.startsWith("thank you") ||
+    normalized.startsWith("sorry ") ||
+    normalized.startsWith("i'm sorry") ||
+    normalized.startsWith("im sorry") ||
+    normalized.startsWith("tone:") ||
+    normalized.startsWith("format:") ||
+    normalized.startsWith("formatting:") ||
+    normalized.startsWith("output format:")
+  );
+}
+
+function stripMarkdownPrefix(line: string): string {
+  return line
+    .replace(/^`{3,}/, "")
+    .replace(/`{3,}$/, "")
+    .replace(/^\s{0,3}#{1,6}\s+/, "")
+    .replace(/^\s*[-*+]\s+/, "")
+    .replace(/^\s*\d+[.)]\s+/, "")
+    .replace(/^\s*>\s?/, "")
+    .trim();
+}
+
+function stripConversationalLead(line: string): string {
+  return line
+    .replace(/^(can|could|would)\s+you\s+/i, "")
+    .replace(/^i\s+(need|want|would like)\s+(you\s+)?to\s+/i, "")
+    .replace(/^help\s+me\s+/i, "")
+    .replace(/^we\s+need\s+to\s+/i, "")
+    .replace(/^the\s+task\s+is\s+to\s+/i, "")
+    .replace(/^my\s+request\s+is\s+to\s+/i, "")
+    .trim();
+}
+
+function stripFillerWords(line: string): string {
+  return line
+    .replace(
+      /\b(please|kindly|just|really|basically|honestly|literally|maybe|probably|sort of|kind of|if possible|when you get a chance)\b/gi,
+      ""
+    )
+    .replace(/\b(make sure to|be careful to|i think|i feel like)\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function selectTechnicalSentence(value: string): string {
+  const sentences = value
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+
+  if (sentences.length <= 1) {
+    return value;
+  }
+
+  const technical = sentences.filter((sentence) =>
+    /\b(add|build|create|fix|implement|refactor|remove|replace|update|wire|test|debug|migrate|backend|frontend|api|rust|tauri|component|model|prompt|token|cache|download|dispatch|ui)\b/i.test(
+      sentence
+    )
+  );
+
+  return (technical.length > 0 ? technical : sentences).join(" ");
 }
 
 function estimateTokens(value: string): number {
