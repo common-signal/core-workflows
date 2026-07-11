@@ -1,44 +1,25 @@
-import { invoke, isTauri } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import logoUrl from "../assets/logo.png";
-
-type Archetype = "Prototyper" | "Builder" | "Sweeper" | "Grower" | "Maintainer";
-
-type ArchetypeOption = {
-  readonly archetype: Archetype;
-  readonly description: string;
-  readonly signal: string;
-};
-
-const ARCHETYPES: readonly ArchetypeOption[] = [
-  {
-    archetype: "Prototyper",
-    description: "Explore a first pass, test feasibility, and make the idea visible.",
-    signal: "Quick version, clear learning."
-  },
-  {
-    archetype: "Builder",
-    description: "Implement planned work, wire structure, and keep behavior testable.",
-    signal: "Known direction, careful execution."
-  },
-  {
-    archetype: "Sweeper",
-    description: "Clean, migrate, deduplicate, and make the system easier to change.",
-    signal: "Working system, cleaner shape."
-  },
-  {
-    archetype: "Grower",
-    description: "Expand a working foundation through product surface, docs, and scale paths.",
-    signal: "Existing seed, stronger surface."
-  },
-  {
-    archetype: "Maintainer",
-    description: "Protect reliability, security posture, operating checks, and regressions.",
-    signal: "Stable baseline, visible health."
-  }
-];
-
-const DEFAULT_ARCHETYPE: Archetype = "Builder";
-const BROWSER_PREVIEW_PROFILE_KEY = "common-signal.preview-archetype-profile";
+import {
+  bootstrapClientEngine,
+  canInvokeTauri,
+  type ClientEngineState
+} from "./core/localEngine";
+import {
+  CLOUD_PROVIDERS,
+  createCloudRoute,
+  createLocalRoute,
+  describeRoute,
+  type CloudProviderId,
+  type RuntimeRoute
+} from "./core/providerRouting";
+import {
+  DEFAULT_ROLE,
+  getRoleOption,
+  ROLE_OPTIONS,
+  shouldRecommendCloudBridge,
+  type RoleName
+} from "./core/roles";
 
 type SaveResult =
   | {
@@ -48,28 +29,30 @@ type SaveResult =
       readonly mode: "browser-preview";
     };
 
-type TauriRuntimeWindow = Window &
-  typeof globalThis & {
-    readonly __TAURI_INTERNALS__?: {
-      readonly invoke?: unknown;
-    };
-  };
-
-type OllamaTagsResponse = {
-  readonly models?: readonly {
-    readonly name?: string;
-  }[];
+type CloudBridgeModalState = {
+  readonly role: RoleName;
+  readonly provider: CloudProviderId;
+  readonly apiKey: string;
+  readonly error: string | null;
 };
 
-const DEFAULT_OLLAMA_API_BASE = "http://127.0.0.1:11434";
-const DEFAULT_OLLAMA_TAGS_PATH = "/api/tags";
+const BROWSER_PREVIEW_PROFILE_KEY = "common-signal.preview-archetype-profile";
+const DEFAULT_LOCAL_ROUTE = createLocalRoute(
+  "http://127.0.0.1:11434",
+  "llama3.2:3b",
+  DEFAULT_ROLE,
+  "browser-preview"
+);
 
 export function renderOnboarding(root: HTMLElement): void {
-  let selected: Archetype = DEFAULT_ARCHETYPE;
+  let selected: RoleName = DEFAULT_ROLE;
   let isSaving = false;
-  let isCheckingOllama = false;
+  let isBooting = true;
+  let engineState: ClientEngineState | null = null;
+  let route: RuntimeRoute = DEFAULT_LOCAL_ROUTE;
+  let modalState: CloudBridgeModalState | null = null;
+  let localOverrideRoles = new Set<RoleName>();
   let status = getInitialStatus();
-  let ollamaStatus = "Ollama models have not been checked.";
   let statusTone: "idle" | "success" | "error" = "idle";
 
   const render = () => {
@@ -82,6 +65,32 @@ export function renderOnboarding(root: HTMLElement): void {
     render();
   };
 
+  const bootstrapEngine = async () => {
+    isBooting = true;
+    setStatus("Starting the local Common Signal engine...");
+
+    try {
+      const nextEngineState = await bootstrapClientEngine(selected);
+      engineState = nextEngineState;
+
+      if (route.source !== "cloud-bridge") {
+        route = createLocalRouteForRole(selected);
+      }
+
+      if (shouldOpenCloudBridge(selected)) {
+        openCloudBridge(selected);
+        return;
+      }
+
+      setStatus(formatBootStatus(nextEngineState), nextEngineState.localRuntime.reachable ? "success" : "idle");
+    } catch (error) {
+      setStatus(formatInvokeError(error), "error");
+    } finally {
+      isBooting = false;
+      render();
+    }
+  };
+
   const saveSelection = async () => {
     if (isSaving) {
       return;
@@ -91,14 +100,14 @@ export function renderOnboarding(root: HTMLElement): void {
     setStatus(`Setting ${selected} as the active profile...`);
 
     try {
-      const saveResult = await saveArchetypeProfile(selected);
+      const saveResult = await saveArchetypeProfile(selected, route);
 
       if (saveResult.mode === "browser-preview") {
         setStatus(`${selected} saved for this browser preview.`, "success");
         return;
       }
 
-      setStatus(`${selected} is now the active local profile.`, "success");
+      setStatus(`${selected} is now active through ${route.label}.`, "success");
     } catch (error) {
       setStatus(formatInvokeError(error), "error");
     } finally {
@@ -107,31 +116,119 @@ export function renderOnboarding(root: HTMLElement): void {
     }
   };
 
-  const checkOllama = async () => {
-    if (isCheckingOllama) {
+  const selectRole = (role: RoleName) => {
+    selected = role;
+
+    if (shouldOpenCloudBridge(role)) {
+      openCloudBridge(role);
+      render();
       return;
     }
 
-    isCheckingOllama = true;
-    ollamaStatus = "Checking local Ollama models...";
+    modalState = null;
+    route = createLocalRouteForRole(role);
+    statusTone = "idle";
+    status = `${role} is ready locally with ${route.model}.`;
     render();
-
-    try {
-      const modelNames = await getOllamaModels();
-      ollamaStatus = formatOllamaModels(modelNames);
-    } catch (error) {
-      ollamaStatus = formatInvokeError(error);
-    } finally {
-      isCheckingOllama = false;
-      render();
-    }
   };
 
-  const selectArchetype = (archetype: Archetype) => {
-    selected = archetype;
+  const refreshEngine = () => {
+    void bootstrapEngine();
+  };
+
+  const openCloudBridge = (role: RoleName) => {
+    modalState = {
+      role,
+      provider: preferredProviderForRole(role),
+      apiKey: "",
+      error: null
+    };
     statusTone = "idle";
-    status = `${archetype} is ready to apply.`;
+    status = `${role} can run locally, but Cloud Bridge is recommended for this hardware.`;
+  };
+
+  const updateCloudProvider = (provider: CloudProviderId) => {
+    if (!modalState) {
+      return;
+    }
+
+    modalState = {
+      ...modalState,
+      provider,
+      error: null
+    };
     render();
+  };
+
+  const updateCloudApiKey = (apiKey: string) => {
+    if (!modalState) {
+      return;
+    }
+
+    modalState = {
+      ...modalState,
+      apiKey,
+      error: null
+    };
+  };
+
+  const applyCloudBridge = () => {
+    if (!modalState) {
+      return;
+    }
+
+    const apiKey = modalState.apiKey.trim();
+
+    if (!apiKey) {
+      modalState = {
+        ...modalState,
+        error: "Paste a personal provider API key to bridge this role."
+      };
+      render();
+      return;
+    }
+
+    route = createCloudRoute(modalState.provider, apiKey, modalState.role);
+    selected = modalState.role;
+    modalState = null;
+    setStatus(`${selected} is bridged through ${route.label}.`, "success");
+  };
+
+  const overrideLocal = () => {
+    if (!modalState) {
+      return;
+    }
+
+    localOverrideRoles = new Set(localOverrideRoles).add(modalState.role);
+    selected = modalState.role;
+    route = createLocalRouteForRole(modalState.role);
+    modalState = null;
+    setStatus(`${selected} will run locally with ${route.model}.`, "idle");
+  };
+
+  const shouldOpenCloudBridge = (role: RoleName): boolean => {
+    if (!engineState) {
+      return false;
+    }
+
+    const totalRamGb = engineState.hardware.totalRamGb;
+
+    return shouldRecommendCloudBridge(role, totalRamGb, localOverrideRoles.has(role));
+  };
+
+  const createLocalRouteForRole = (role: RoleName): RuntimeRoute => {
+    const option = getRoleOption(role);
+    const model =
+      option.localModel === "engine-default"
+        ? engineState?.hardware.defaultLocalModel ?? route.model
+        : option.localModel;
+
+    return createLocalRoute(
+      engineState?.providerRoute.baseUrl ?? DEFAULT_LOCAL_ROUTE.baseUrl,
+      model,
+      role,
+      engineState?.providerRoute.source ?? "browser-preview"
+    );
   };
 
   const buildView = (): HTMLElement => {
@@ -149,11 +246,11 @@ export function renderOnboarding(root: HTMLElement): void {
 
     const titleBlock = createElement("div", "title-block");
     const eyebrow = createElement("p", "eyebrow", "Common Signal");
-    const title = createElement("h1", undefined, "Archetype Onboarding");
+    const title = createElement("h1", undefined, "Local Engine");
     const subtitle = createElement(
       "p",
       "subtitle",
-      "Pick the work profile that best matches this local workspace session."
+      "Choose a role. Common Signal keeps the default route local and recommends a cloud bridge only when the workload outgrows this machine."
     );
     titleBlock.append(eyebrow, title, subtitle);
     brandBlock.append(logoFrame, titleBlock);
@@ -161,68 +258,157 @@ export function renderOnboarding(root: HTMLElement): void {
     const statusPill = createElement("p", `status-pill ${statusTone}`, status);
     header.append(brandBlock, statusPill);
 
+    const diagnostics = buildDiagnostics();
     const grid = createElement("section", "archetype-grid");
     grid.setAttribute("role", "radiogroup");
-    grid.setAttribute("aria-label", "Archetype choices");
+    grid.setAttribute("aria-label", "Common Signal role choices");
 
-    for (const option of ARCHETYPES) {
-      grid.append(buildArchetypeButton(option));
+    for (const option of ROLE_OPTIONS) {
+      grid.append(buildRoleButton(option.role));
     }
 
     const footer = createElement("footer", "action-bar");
-    const activeLabel = createElement("p", "active-label", `Active selection: ${selected}`);
+    const activeLabel = createElement("p", "active-label", `Active route: ${selected}`);
     const actions = createElement("div", "actions");
-    const ollamaAction = createElement(
+    const refreshAction = createElement(
       "button",
       "secondary-action",
-      isCheckingOllama ? "Checking..." : "Check Ollama"
+      isBooting ? "Starting..." : "Refresh Engine"
     );
-    ollamaAction.setAttribute("type", "button");
-    ollamaAction.disabled = isCheckingOllama;
-    ollamaAction.addEventListener("click", () => {
-      void checkOllama();
-    });
+    refreshAction.setAttribute("type", "button");
+    refreshAction.disabled = isBooting;
+    refreshAction.addEventListener("click", refreshEngine);
     const action = createElement(
       "button",
       "primary-action",
       isSaving ? "Applying..." : "Apply Profile"
     );
     action.setAttribute("type", "button");
-    action.disabled = isSaving;
+    action.disabled = isSaving || isBooting;
     action.addEventListener("click", () => {
       void saveSelection();
     });
-    actions.append(ollamaAction, action);
+    actions.append(refreshAction, action);
     footer.append(activeLabel, actions);
 
-    const diagnostics = createElement("section", "diagnostics");
-    diagnostics.setAttribute("aria-label", "Local runtime diagnostics");
-    diagnostics.append(createElement("p", "diagnostic-label", "Ollama"));
-    diagnostics.append(createElement("p", "diagnostic-value", ollamaStatus));
+    shell.append(header, diagnostics, grid, footer);
 
-    shell.append(header, grid, diagnostics, footer);
+    if (modalState) {
+      shell.append(buildCloudBridgeModal(modalState));
+    }
+
     return shell;
   };
 
-  const buildArchetypeButton = (option: ArchetypeOption): HTMLButtonElement => {
+  const buildDiagnostics = (): HTMLElement => {
+    const diagnostics = createElement("section", "diagnostics");
+    diagnostics.setAttribute("aria-label", "Local runtime diagnostics");
+    diagnostics.append(
+      buildDiagnosticItem("Hardware", formatHardware(engineState)),
+      buildDiagnosticItem("Runtime", formatRuntime(engineState, isBooting)),
+      buildDiagnosticItem("Route", describeRoute(route))
+    );
+
+    return diagnostics;
+  };
+
+  const buildDiagnosticItem = (label: string, value: string): HTMLElement => {
+    const item = createElement("div", "diagnostic-item");
+    item.append(
+      createElement("p", "diagnostic-label", label),
+      createElement("p", "diagnostic-value", value)
+    );
+
+    return item;
+  };
+
+  const buildRoleButton = (role: RoleName): HTMLButtonElement => {
+    const option = getRoleOption(role);
     const button = createElement("button", "archetype-option") as HTMLButtonElement;
-    const isSelected = option.archetype === selected;
+    const isSelected = option.role === selected;
+    const cloudRecommended = shouldOpenCloudBridge(option.role);
 
     button.type = "button";
     button.setAttribute("role", "radio");
     button.setAttribute("aria-checked", String(isSelected));
     button.dataset.selected = String(isSelected);
-    button.addEventListener("click", () => selectArchetype(option.archetype));
+    button.dataset.cloudRecommended = String(cloudRecommended);
+    button.addEventListener("click", () => selectRole(option.role));
 
-    const name = createElement("span", "option-name", option.archetype);
+    const name = createElement("span", "option-name", option.role);
     const description = createElement("span", "option-description", option.description);
-    const signal = createElement("span", "option-signal", option.signal);
+    const signal = createElement(
+      "span",
+      "option-signal",
+      cloudRecommended ? "Cloud Bridge recommended" : option.signal
+    );
 
     button.append(name, description, signal);
     return button;
   };
 
+  const buildCloudBridgeModal = (state: CloudBridgeModalState): HTMLElement => {
+    const overlay = createElement("section", "modal-overlay");
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
+    overlay.setAttribute("aria-label", "Cloud Bridge");
+
+    const modal = createElement("div", "cloud-modal");
+    const title = createElement("h2", undefined, "Cloud Bridge");
+    const copy = createElement(
+      "p",
+      "modal-copy",
+      `The ${state.role} requires deep reasoning and a massive context window. To run this flawlessly without slowing down your computer, we recommend bridging to a cloud provider.`
+    );
+
+    const providerTabs = createElement("div", "provider-tabs");
+
+    for (const provider of CLOUD_PROVIDERS) {
+      const providerButton = createElement("button", "provider-tab", provider.label);
+      providerButton.setAttribute("type", "button");
+      providerButton.dataset.selected = String(provider.id === state.provider);
+      providerButton.addEventListener("click", () => updateCloudProvider(provider.id));
+      providerTabs.append(providerButton);
+    }
+
+    const selectedProvider = CLOUD_PROVIDERS.find((provider) => provider.id === state.provider);
+    const input = createElement("input", "api-key-input") as HTMLInputElement;
+    input.type = "password";
+    input.value = state.apiKey;
+    input.placeholder = selectedProvider?.apiKeyPlaceholder ?? "API key";
+    input.autocomplete = "off";
+    input.spellcheck = false;
+    input.addEventListener("input", (event) => {
+      updateCloudApiKey((event.currentTarget as HTMLInputElement).value);
+    });
+
+    const error = state.error ? createElement("p", "modal-error", state.error) : null;
+    const modalActions = createElement("div", "modal-actions");
+    const bridgeAction = createElement("button", "primary-action", "Bridge Provider");
+    bridgeAction.setAttribute("type", "button");
+    bridgeAction.addEventListener("click", applyCloudBridge);
+    const overrideAction = createElement(
+      "button",
+      "text-action",
+      "Override and run locally anyway"
+    );
+    overrideAction.setAttribute("type", "button");
+    overrideAction.addEventListener("click", overrideLocal);
+    modalActions.append(bridgeAction, overrideAction);
+
+    modal.append(title, copy, providerTabs, input);
+
+    if (error) {
+      modal.append(error);
+    }
+
+    modal.append(modalActions);
+    overlay.append(modal);
+    return overlay;
+  };
+
   render();
+  void bootstrapEngine();
 }
 
 function createElement<K extends keyof HTMLElementTagNameMap>(
@@ -255,10 +441,13 @@ function formatInvokeError(error: unknown): string {
   return "Common Signal could not update the local profile.";
 }
 
-async function saveArchetypeProfile(archetype: Archetype): Promise<SaveResult> {
+async function saveArchetypeProfile(
+  role: RoleName,
+  route: RuntimeRoute
+): Promise<SaveResult> {
   if (canInvokeTauri()) {
     const updated = await invoke<boolean>("update_archetype_profile", {
-      archetype
+      archetype: role
     });
 
     if (!updated) {
@@ -268,19 +457,19 @@ async function saveArchetypeProfile(archetype: Archetype): Promise<SaveResult> {
     return { mode: "desktop" };
   }
 
-  saveBrowserPreviewProfile(archetype);
+  saveBrowserPreviewProfile(role, route);
   return { mode: "browser-preview" };
 }
 
-function canInvokeTauri(): boolean {
-  const runtimeWindow = window as TauriRuntimeWindow;
-
-  return isTauri() && typeof runtimeWindow.__TAURI_INTERNALS__?.invoke === "function";
-}
-
-function saveBrowserPreviewProfile(archetype: Archetype): void {
+function saveBrowserPreviewProfile(role: RoleName, route: RuntimeRoute): void {
   const previewState = {
-    archetype,
+    role,
+    route: {
+      provider: route.provider,
+      baseUrl: route.baseUrl,
+      model: route.model,
+      source: route.source
+    },
     updatedAt: new Date().toISOString(),
     source: "browser-preview"
   };
@@ -290,74 +479,71 @@ function saveBrowserPreviewProfile(archetype: Archetype): void {
 
 function getInitialStatus(): string {
   if (canInvokeTauri()) {
-    return "Select an archetype to set the local Common Signal profile.";
+    return "Preparing the local Common Signal engine.";
   }
 
-  return "Browser preview is active. Desktop save uses the Tauri shell.";
+  return "Browser preview is active. Desktop launch manages the local engine.";
 }
 
-async function getOllamaModels(): Promise<string[]> {
-  if (canInvokeTauri()) {
-    return invoke<string[]>("check_ollama_connection");
+function formatBootStatus(engineState: ClientEngineState): string {
+  const runtime = engineState.localRuntime;
+
+  if (runtime.defaultModelReady) {
+    return `${runtime.status} ${runtime.defaultModel} is ready.`;
   }
 
-  const response = await fetch(await getBrowserPreviewOllamaTagsUrl());
-
-  if (!response.ok) {
-    return [`Ollama responded with HTTP status ${response.status}.`];
+  if (runtime.defaultModelPullStarted) {
+    return `${runtime.status} Pulling ${runtime.defaultModel} in the background.`;
   }
 
-  const payload = (await response.json()) as OllamaTagsResponse;
-  const modelNames = payload.models
-    ?.map((model) => model.name?.trim() ?? "")
-    .filter((name) => name.length > 0)
-    .sort();
-
-  return modelNames?.length
-    ? modelNames
-    : ["Ollama is reachable, but no local models were reported."];
+  return runtime.status;
 }
 
-async function getBrowserPreviewOllamaTagsUrl(): Promise<string> {
-  const configBody = await readBrowserPreviewConfig();
-  const apiBase =
-    parseYamlScalar(configBody, "api_base") ?? DEFAULT_OLLAMA_API_BASE;
-  const tagsPath =
-    parseYamlScalar(configBody, "tags_path") ?? DEFAULT_OLLAMA_TAGS_PATH;
-
-  return `${apiBase.replace(/\/+$/, "")}${normalizeUrlPath(tagsPath)}`;
-}
-
-async function readBrowserPreviewConfig(): Promise<string> {
-  for (const path of ["/config/signal.local.yaml", "/config/signal.example.yaml"]) {
-    try {
-      const response = await fetch(path);
-
-      if (response.ok) {
-        return response.text();
-      }
-    } catch {
-      continue;
-    }
+function formatHardware(engineState: ClientEngineState | null): string {
+  if (!engineState) {
+    return "Scanning RAM...";
   }
 
-  return "";
+  const hardware = engineState.hardware;
+  const ram = hardware.totalRamGb > 0 ? `${hardware.totalRamGb} GB RAM` : "RAM unknown";
+
+  return `${ram}, ${hardware.tier}, default ${hardware.defaultLocalModel}`;
 }
 
-function parseYamlScalar(configBody: string, key: string): string | null {
-  const pattern = new RegExp(`^\\s*${key}:\\s*['"]?([^'"\\r\\n#]+)['"]?`, "m");
-  const match = configBody.match(pattern);
-  return match?.[1]?.trim() ?? null;
-}
-
-function normalizeUrlPath(path: string): string {
-  return path.startsWith("/") ? path : `/${path}`;
-}
-
-function formatOllamaModels(modelNames: readonly string[]): string {
-  if (modelNames.length === 0) {
-    return "Ollama is reachable, but no local models were reported.";
+function formatRuntime(engineState: ClientEngineState | null, isBooting: boolean): string {
+  if (isBooting && !engineState) {
+    return "Pinging local Ollama...";
   }
 
-  return `Models: ${modelNames.join(", ")}`;
+  if (!engineState) {
+    return "Waiting for engine state.";
+  }
+
+  const runtime = engineState.localRuntime;
+
+  if (runtime.defaultModelError) {
+    return runtime.defaultModelError;
+  }
+
+  if (runtime.defaultModelPullStarted) {
+    return `Connected to Ollama. Pulling ${runtime.defaultModel}.`;
+  }
+
+  if (runtime.reachable) {
+    return `Connected to Ollama ${runtime.version ?? "unknown"}.`;
+  }
+
+  return runtime.status;
+}
+
+function preferredProviderForRole(role: RoleName): CloudProviderId {
+  if (role === "Maintainer") {
+    return "openai";
+  }
+
+  if (role === "Prototyper" || role === "Grower") {
+    return "google";
+  }
+
+  return "anthropic";
 }

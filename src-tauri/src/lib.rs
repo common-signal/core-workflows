@@ -1,3 +1,6 @@
+mod hardware;
+mod local_engine;
+
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
@@ -186,7 +189,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             scan_local_repository,
             update_archetype_profile,
-            check_ollama_connection
+            check_ollama_connection,
+            hardware::scan_hardware_profile,
+            local_engine::bootstrap_local_engine
         ])
         .run(tauri::generate_context!())
         .expect("error while running Common Signal desktop application");

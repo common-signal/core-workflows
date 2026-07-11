@@ -1,6 +1,6 @@
 :root {
   color: #17211f;
-  background: #f7f5ef;
+  background: #f4f6f8;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
@@ -30,12 +30,12 @@ button {
 
 .app-shell {
   display: grid;
-  grid-template-rows: auto 1fr auto auto;
+  grid-template-rows: auto auto 1fr auto;
   min-height: 100vh;
   padding: 32px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.76), rgba(255, 255, 255, 0) 42%),
-    #f7f5ef;
+    linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(255, 255, 255, 0) 42%),
+    #f4f6f8;
 }
 
 .workspace-header {
@@ -114,7 +114,7 @@ h1 {
   width: 100%;
   min-height: 48px;
   padding: 12px 14px;
-  border: 1px solid #d9d6ca;
+  border: 1px solid #d3dbd8;
   border-radius: 8px;
   background: #ffffff;
   color: #52615d;
@@ -150,9 +150,9 @@ h1 {
   gap: 12px;
   min-height: 228px;
   padding: 18px;
-  border: 1px solid #d8d4c7;
+  border: 1px solid #d3dbd8;
   border-radius: 8px;
-  background: #fffdf8;
+  background: #ffffff;
   color: #17211f;
   text-align: left;
   cursor: pointer;
@@ -175,6 +175,10 @@ h1 {
   border-color: #253d38;
   background: #eef5f2;
   box-shadow: inset 0 0 0 2px #253d38;
+}
+
+.archetype-option[data-cloud-recommended="true"] {
+  border-color: #b8735d;
 }
 
 .option-name {
@@ -206,7 +210,7 @@ h1 {
   width: 100%;
   margin: 28px auto 0;
   padding-top: 18px;
-  border-top: 1px solid #ddd8ca;
+  border-top: 1px solid #d3dbd8;
 }
 
 .actions {
@@ -223,16 +227,22 @@ h1 {
 
 .diagnostics {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
-  align-items: center;
+  align-items: stretch;
   max-width: 1180px;
   width: 100%;
-  margin: 22px auto 0;
+  margin: 0 auto 22px;
+}
+
+.diagnostic-item {
+  display: grid;
+  gap: 6px;
+  min-height: 82px;
   padding: 12px 14px;
-  border: 1px solid #ddd8ca;
+  border: 1px solid #d3dbd8;
   border-radius: 8px;
-  background: #fffdf8;
+  background: #ffffff;
 }
 
 .diagnostic-label,
@@ -269,12 +279,123 @@ h1 {
   min-width: 138px;
   min-height: 44px;
   padding: 0 16px;
-  border: 1px solid #bdb7a6;
+  border: 1px solid #b9c3bf;
   border-radius: 8px;
-  background: #fffdf8;
+  background: #ffffff;
   color: #253d38;
   font-weight: 820;
   cursor: pointer;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+  background: rgba(12, 24, 22, 0.48);
+}
+
+.cloud-modal {
+  display: grid;
+  gap: 16px;
+  width: min(100%, 560px);
+  padding: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 28px 80px rgba(12, 24, 22, 0.32);
+}
+
+.cloud-modal h2 {
+  margin: 0;
+  color: #12211f;
+  font-size: 1.38rem;
+  line-height: 1.2;
+}
+
+.modal-copy,
+.modal-error {
+  margin: 0;
+  font-size: 0.96rem;
+  line-height: 1.55;
+}
+
+.modal-copy {
+  color: #45524f;
+}
+
+.modal-error {
+  color: #8f2f22;
+  font-weight: 720;
+}
+
+.provider-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.provider-tab {
+  min-height: 40px;
+  padding: 0 10px;
+  border: 1px solid #b9c3bf;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #253d38;
+  font-size: 0.9rem;
+  font-weight: 780;
+  cursor: pointer;
+}
+
+.provider-tab[data-selected="true"] {
+  border-color: #253d38;
+  background: #eef5f2;
+  box-shadow: inset 0 0 0 2px #253d38;
+}
+
+.api-key-input {
+  width: 100%;
+  min-height: 46px;
+  padding: 0 12px;
+  border: 1px solid #b9c3bf;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #17211f;
+  font: inherit;
+}
+
+.api-key-input:focus {
+  border-color: #253d38;
+  outline: 3px solid rgba(37, 61, 56, 0.18);
+  outline-offset: 2px;
+}
+
+.modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.text-action {
+  min-height: 40px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #7b3428;
+  font-weight: 760;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.text-action:hover,
+.text-action:focus-visible {
+  color: #522116;
+  outline: 3px solid rgba(123, 52, 40, 0.16);
+  outline-offset: 4px;
 }
 
 .secondary-action:hover,
@@ -303,6 +424,7 @@ h1 {
 
 @media (max-width: 980px) {
   .workspace-header,
+  .diagnostics,
   .archetype-grid {
     grid-template-columns: 1fr;
   }
