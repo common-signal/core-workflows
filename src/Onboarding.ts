@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import logoUrl from "../assets/logo.png";
+import { createLocalReconController } from "./LocalRecon";
 import {
   bootstrapClientEngine,
   canInvokeTauri,
@@ -38,8 +39,8 @@ type CloudBridgeModalState = {
 
 const BROWSER_PREVIEW_PROFILE_KEY = "common-signal.preview-archetype-profile";
 const DEFAULT_LOCAL_ROUTE = createLocalRoute(
-  "http://127.0.0.1:11434",
-  "llama3.2:3b",
+  "embedded://mistral.rs",
+  "phi3-mini-4k-instruct-q4",
   DEFAULT_ROLE,
   "browser-preview"
 );
@@ -58,6 +59,7 @@ export function renderOnboarding(root: HTMLElement): void {
   const render = () => {
     root.replaceChildren(buildView());
   };
+  const localRecon = createLocalReconController(render);
 
   const setStatus = (message: string, tone: "idle" | "success" | "error" = "idle") => {
     status = message;
@@ -67,7 +69,7 @@ export function renderOnboarding(root: HTMLElement): void {
 
   const bootstrapEngine = async () => {
     isBooting = true;
-    setStatus("Starting the local Common Signal engine...");
+    setStatus("Starting embedded Local Recon...");
 
     try {
       const nextEngineState = await bootstrapClientEngine(selected);
@@ -128,7 +130,7 @@ export function renderOnboarding(root: HTMLElement): void {
     modalState = null;
     route = createLocalRouteForRole(role);
     statusTone = "idle";
-    status = `${role} is ready locally with ${route.model}.`;
+    status = `${role} is ready through Local Recon with ${route.model}.`;
     render();
   };
 
@@ -203,7 +205,7 @@ export function renderOnboarding(root: HTMLElement): void {
     selected = modalState.role;
     route = createLocalRouteForRole(modalState.role);
     modalState = null;
-    setStatus(`${selected} will run locally with ${route.model}.`, "idle");
+    setStatus(`${selected} will run through Local Recon with ${route.model}.`, "idle");
   };
 
   const shouldOpenCloudBridge = (role: RoleName): boolean => {
@@ -246,11 +248,11 @@ export function renderOnboarding(root: HTMLElement): void {
 
     const titleBlock = createElement("div", "title-block");
     const eyebrow = createElement("p", "eyebrow", "Common Signal");
-    const title = createElement("h1", undefined, "Local Engine");
+    const title = createElement("h1", undefined, "Local Recon");
     const subtitle = createElement(
       "p",
       "subtitle",
-      "Choose a role. Common Signal keeps the default route local and recommends a cloud bridge only when the workload outgrows this machine."
+      "Choose a role, distill raw intent locally, then dispatch only the lean payload when cloud reasoning is worth the spend."
     );
     titleBlock.append(eyebrow, title, subtitle);
     brandBlock.append(logoFrame, titleBlock);
@@ -291,7 +293,7 @@ export function renderOnboarding(root: HTMLElement): void {
     actions.append(refreshAction, action);
     footer.append(activeLabel, actions);
 
-    shell.append(header, diagnostics, grid, footer);
+    shell.append(header, diagnostics, localRecon.build(engineState), grid, footer);
 
     if (modalState) {
       shell.append(buildCloudBridgeModal(modalState));
@@ -479,21 +481,17 @@ function saveBrowserPreviewProfile(role: RoleName, route: RuntimeRoute): void {
 
 function getInitialStatus(): string {
   if (canInvokeTauri()) {
-    return "Preparing the local Common Signal engine.";
+    return "Preparing embedded Local Recon.";
   }
 
-  return "Browser preview is active. Desktop launch manages the local engine.";
+  return "Browser preview is active. Desktop launch manages embedded Local Recon.";
 }
 
 function formatBootStatus(engineState: ClientEngineState): string {
   const runtime = engineState.localRuntime;
 
-  if (runtime.defaultModelReady) {
+  if (runtime.selectedModelReady) {
     return `${runtime.status} ${runtime.defaultModel} is ready.`;
-  }
-
-  if (runtime.defaultModelPullStarted) {
-    return `${runtime.status} Pulling ${runtime.defaultModel} in the background.`;
   }
 
   return runtime.status;
@@ -506,13 +504,14 @@ function formatHardware(engineState: ClientEngineState | null): string {
 
   const hardware = engineState.hardware;
   const ram = hardware.totalRamGb > 0 ? `${hardware.totalRamGb} GB RAM` : "RAM unknown";
+  const vram = hardware.totalVramGb > 0 ? `, ${hardware.totalVramGb} GB VRAM` : "";
 
-  return `${ram}, ${hardware.tier}, default ${hardware.defaultLocalModel}`;
+  return `${ram}${vram}, ${hardware.tier}, default ${hardware.defaultLocalModel}`;
 }
 
 function formatRuntime(engineState: ClientEngineState | null, isBooting: boolean): string {
   if (isBooting && !engineState) {
-    return "Pinging local Ollama...";
+    return "Starting embedded runtime...";
   }
 
   if (!engineState) {
@@ -521,16 +520,8 @@ function formatRuntime(engineState: ClientEngineState | null, isBooting: boolean
 
   const runtime = engineState.localRuntime;
 
-  if (runtime.defaultModelError) {
-    return runtime.defaultModelError;
-  }
-
-  if (runtime.defaultModelPullStarted) {
-    return `Connected to Ollama. Pulling ${runtime.defaultModel}.`;
-  }
-
-  if (runtime.reachable) {
-    return `Connected to Ollama ${runtime.version ?? "unknown"}.`;
+  if (runtime.selectedModelReady) {
+    return `Embedded ${runtime.engine} ready with ${runtime.defaultModel}.`;
   }
 
   return runtime.status;

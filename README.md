@@ -163,23 +163,18 @@ In desktop mode, selecting an archetype and clicking `Apply Profile` invokes the
 .common-signal/local/archetype-profile.json
 ```
 
-The desktop backend also includes `check_ollama_connection`, which calls the local Ollama tags endpoint and returns the available model names to the frontend:
+The desktop backend also includes Local Recon commands backed by embedded `mistral.rs`. The backend recommends a GGUF model from local RAM/VRAM, loads the model without an external daemon, distills raw intent, and can dispatch the approved distilled prompt to a configured paid provider.
 
-```text
-http://127.0.0.1:11434/api/tags
-```
-
-The endpoint is configurable through `config/signal.local.yaml`. If that file is not present, Common Signal falls back to `config/signal.example.yaml`, then to `http://127.0.0.1:11434`.
+The local recon defaults are configurable through `config/signal.local.yaml`. If that file is not present, Common Signal falls back to `config/signal.example.yaml`.
 
 ```yaml
 local_runtime:
-  ollama:
-    api_base: http://127.0.0.1:11434
-    tags_path: /api/tags
-    aider_model: ollama_chat/qwen2.5-coder
+  local_recon:
+    engine: mistral.rs
+    cache_dir: .common-signal/runtime/local-recon-models
+    distillation_model: phi3-mini-4k-instruct-q4
+    dispatch_provider: openai
 ```
-
-If Ollama is not reachable, the command returns a descriptive fallback string instead of crashing the Tauri app.
 
 Build checks:
 
@@ -192,54 +187,19 @@ npm run desktop:build
 
 The `package-lock.json` file is intentionally committed. It pins the npm dependency graph for the Tauri/Vite client so contributors and CI install the same package versions.
 
-## Local Ollama And Aider
+## Local Recon
 
-Common Signal, made by BakerTech, can run against a local Ollama and Aider workflow for private repository work.
+Common Signal uses Local Recon to compress messy human intent before a paid model ever sees it. The desktop app loads a quantized GGUF model through embedded `mistral.rs`, applies the built-in distillation system prompt, shows raw/distilled token estimates, and dispatches only the approved distilled payload.
 
-Override the local Ollama endpoint by creating `config/signal.local.yaml` and changing `local_runtime.ollama.api_base`:
+Override the default Local Recon settings by creating `config/signal.local.yaml` and changing `local_runtime.local_recon`:
 
 ```yaml
 local_runtime:
-  ollama:
-    api_base: http://127.0.0.1:11434
-    tags_path: /api/tags
-    aider_model: ollama_chat/qwen2.5-coder
-```
-
-Verify Ollama is listening:
-
-```bash
-curl http://127.0.0.1:11434/api/tags
-```
-
-On Windows PowerShell:
-
-```powershell
-Invoke-RestMethod http://127.0.0.1:11434/api/tags
-```
-
-Run the local Aider launcher:
-
-```bash
-bin/signal-aider-local.sh
-```
-
-The launcher checks that `aider` exists in `PATH`, exports the configured Ollama endpoint as `OLLAMA_API_BASE`, reads local Common Signal boundaries from `config/signal.local.yaml` when present, writes a runtime boundary snapshot to `.common-signal/runtime/aider-local-boundaries.env`, and then starts Aider with:
-
-```bash
-aider --model ollama_chat/qwen2.5-coder --architect --auto-commits
-```
-
-Override the default model when needed:
-
-```bash
-AIDER_OLLAMA_MODEL=ollama_chat/llama3.1 bin/signal-aider-local.sh
-```
-
-Pass additional Aider arguments after the script name:
-
-```bash
-bin/signal-aider-local.sh README.md config/signal.example.yaml
+  local_recon:
+    engine: mistral.rs
+    cache_dir: .common-signal/runtime/local-recon-models
+    distillation_model: llama3-8b-instruct-q4
+    dispatch_provider: anthropic
 ```
 
 ## Repository Layout

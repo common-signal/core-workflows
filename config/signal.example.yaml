@@ -174,10 +174,11 @@ model_mapping:
       model: github/copilot
 
 local_runtime:
-  ollama:
-    api_base: http://127.0.0.1:11434
-    tags_path: /api/tags
-    aider_model: ollama_chat/qwen2.5-coder
+  local_recon:
+    engine: mistral.rs
+    cache_dir: .common-signal/runtime/local-recon-models
+    distillation_model: phi3-mini-4k-instruct-q4
+    dispatch_provider: openai
 
 token_boundaries:
   default:

@@ -1,20 +1,15 @@
 mod hardware;
-mod local_engine;
+mod local_recon;
 
-use reqwest::blocking::Client;
-use serde::{Deserialize, Serialize};
-use serde_yaml::Value;
+use serde::Serialize;
 use std::{
     collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 const SIGNAL_EXAMPLE_CONFIG: &str = "config/signal.example.yaml";
-const SIGNAL_LOCAL_CONFIG: &str = "config/signal.local.yaml";
-const DEFAULT_OLLAMA_API_BASE: &str = "http://127.0.0.1:11434";
-const DEFAULT_OLLAMA_TAGS_PATH: &str = "/api/tags";
 
 #[derive(Serialize)]
 struct RepositoryScanSummary {
@@ -50,16 +45,6 @@ struct ArchetypeProfileState {
     workspace_root: String,
     updated_at_unix: u64,
     source: &'static str,
-}
-
-#[derive(Deserialize)]
-struct OllamaTagsResponse {
-    models: Vec<OllamaModel>,
-}
-
-#[derive(Deserialize)]
-struct OllamaModel {
-    name: String,
 }
 
 #[tauri::command]
@@ -114,84 +99,18 @@ pub fn update_archetype_profile(archetype: String) -> Result<bool, String> {
     Ok(true)
 }
 
-#[tauri::command]
-pub fn check_ollama_connection() -> Result<Vec<String>, String> {
-    let ollama_config = read_ollama_config()?;
-    let tags_url = ollama_config.tags_url();
-    let client = Client::builder()
-        .timeout(Duration::from_secs(3))
-        .build()
-        .map_err(|error| format!("Failed to create Ollama HTTP client: {error}"))?;
-
-    let response = match client.get(&tags_url).send() {
-        Ok(response) => response,
-        Err(error) => {
-            return Ok(vec![format!(
-                "Ollama is not reachable at {tags_url}: {error}"
-            )]);
-        }
-    };
-
-    let status = response.status();
-
-    if !status.is_success() {
-        return Ok(vec![format!(
-            "Ollama responded at {tags_url} with HTTP status {status}."
-        )]);
-    }
-
-    let payload = match response.json::<OllamaTagsResponse>() {
-        Ok(payload) => payload,
-        Err(error) => {
-            return Ok(vec![format!(
-                "Ollama responded, but Common Signal could not parse /api/tags JSON: {error}"
-            )]);
-        }
-    };
-
-    let mut model_names: Vec<String> = payload
-        .models
-        .into_iter()
-        .map(|model| model.name)
-        .filter(|name| !name.trim().is_empty())
-        .collect();
-
-    model_names.sort();
-    model_names.dedup();
-
-    if model_names.is_empty() {
-        return Ok(vec![
-            "Ollama is reachable, but no local models were reported.".to_string(),
-        ]);
-    }
-
-    Ok(model_names)
-}
-
-struct OllamaConfig {
-    api_base: String,
-    tags_path: String,
-}
-
-impl OllamaConfig {
-    fn tags_url(&self) -> String {
-        format!(
-            "{}{}",
-            self.api_base.trim_end_matches('/'),
-            normalize_url_path(&self.tags_path)
-        )
-    }
-}
-
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_fs::init())
+        .manage(local_recon::LocalReconState::default())
         .invoke_handler(tauri::generate_handler![
             scan_local_repository,
             update_archetype_profile,
-            check_ollama_connection,
             hardware::scan_hardware_profile,
-            local_engine::bootstrap_local_engine
+            local_recon::bootstrap_local_recon,
+            local_recon::download_local_recon_model,
+            local_recon::distill_local_recon_prompt,
+            local_recon::dispatch_distilled_prompt
         ])
         .run(tauri::generate_context!())
         .expect("error while running Common Signal desktop application");
@@ -348,59 +267,6 @@ fn find_common_signal_root() -> Result<PathBuf, String> {
             current_dir.display()
         )
     })
-}
-
-fn read_ollama_config() -> Result<OllamaConfig, String> {
-    let workspace_root = find_common_signal_root()?;
-    let config_path = active_signal_config_path(&workspace_root);
-
-    let config_body = fs::read_to_string(&config_path).map_err(|error| {
-        format!(
-            "Failed to read Common Signal config at {}: {error}",
-            config_path.display()
-        )
-    })?;
-    let config: Value = serde_yaml::from_str(&config_body).map_err(|error| {
-        format!(
-            "Failed to parse Common Signal config at {}: {error}",
-            config_path.display()
-        )
-    })?;
-
-    Ok(OllamaConfig {
-        api_base: yaml_string_at(&config, &["local_runtime", "ollama", "api_base"])
-            .unwrap_or_else(|| DEFAULT_OLLAMA_API_BASE.to_string()),
-        tags_path: yaml_string_at(&config, &["local_runtime", "ollama", "tags_path"])
-            .unwrap_or_else(|| DEFAULT_OLLAMA_TAGS_PATH.to_string()),
-    })
-}
-
-fn active_signal_config_path(workspace_root: &Path) -> PathBuf {
-    let local_config = workspace_root.join(SIGNAL_LOCAL_CONFIG);
-
-    if local_config.is_file() {
-        local_config
-    } else {
-        workspace_root.join(SIGNAL_EXAMPLE_CONFIG)
-    }
-}
-
-fn yaml_string_at(value: &Value, path: &[&str]) -> Option<String> {
-    let mut current = value;
-
-    for key in path {
-        current = current.get(*key)?;
-    }
-
-    current.as_str().map(ToString::to_string)
-}
-
-fn normalize_url_path(path: &str) -> String {
-    if path.starts_with('/') {
-        path.to_string()
-    } else {
-        format!("/{path}")
-    }
 }
 
 fn find_common_signal_root_from(start: &Path) -> Option<PathBuf> {

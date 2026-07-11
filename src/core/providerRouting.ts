@@ -1,6 +1,6 @@
 import type { RoleName } from "./roles";
 
-export type RuntimeProvider = "ollama" | CloudProviderId;
+export type RuntimeProvider = "local-recon" | CloudProviderId;
 export type CloudProviderId = "anthropic" | "openai" | "google";
 
 export type CloudProviderOption = {
@@ -53,8 +53,8 @@ export function createLocalRoute(
   source: RuntimeRoute["source"] = "local-engine"
 ): RuntimeRoute {
   return {
-    provider: "ollama",
-    label: "Local Ollama",
+    provider: "local-recon",
+    label: "Local Recon",
     baseUrl,
     model,
     role,
@@ -93,8 +93,8 @@ export function getCloudProvider(providerId: CloudProviderId): CloudProviderOpti
 }
 
 export function describeRoute(route: RuntimeRoute): string {
-  if (route.provider === "ollama") {
-    return `Local: ${route.model} at ${route.baseUrl}`;
+  if (route.provider === "local-recon") {
+    return `Local Recon: ${route.model}`;
   }
 
   return `Cloud Bridge: ${route.label} using ${route.model}`;

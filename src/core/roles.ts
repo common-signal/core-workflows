@@ -4,7 +4,7 @@ export type RoleOption = {
   readonly role: RoleName;
   readonly description: string;
   readonly signal: string;
-  readonly localModel: "engine-default" | "qwen2.5:7b";
+  readonly localModel: "engine-default" | "llama3-8b-instruct-q4";
   readonly cloudModel: string;
   readonly cloudBridgeRecommendedBelowGb?: number;
 };
@@ -38,14 +38,14 @@ export const ROLE_OPTIONS: readonly RoleOption[] = [
     role: "Grower",
     description: "Expand a working foundation through product surface, docs, and scale paths.",
     signal: "Existing seed, stronger surface.",
-    localModel: "qwen2.5:7b",
+    localModel: "llama3-8b-instruct-q4",
     cloudModel: "gemini-1.5-pro"
   },
   {
     role: "Maintainer",
     description: "Protect reliability, security posture, operating checks, and regressions.",
     signal: "Stable baseline, visible health.",
-    localModel: "qwen2.5:7b",
+    localModel: "llama3-8b-instruct-q4",
     cloudModel: "gpt-4o",
     cloudBridgeRecommendedBelowGb: HEAVY_ROLE_RAM_THRESHOLD_GB
   }
